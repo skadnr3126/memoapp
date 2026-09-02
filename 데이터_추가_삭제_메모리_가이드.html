@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flow Memo — 추가·삭제와 메모리</title>
+  <style>
+    :root{--ink:#172033;--sub:#627087;--line:#dce3ed;--paper:#f6f8fb;--card:#fff;--purple:#5546db;--red:#ba3951;--green:#007b5d}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.7 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{width:min(1000px,calc(100% - 32px));margin:auto;padding:48px 0 80px}h1,h2,h3{line-height:1.25;letter-spacing:-.03em}h1{margin:0 0 12px;font-size:clamp(2rem,5vw,3.2rem)}h2{margin:0 0 17px;font-size:1.45rem}h3{margin:0 0 8px;font-size:1rem}p{margin:0 0 14px}section{margin-top:26px;padding:27px;border:1px solid var(--line);border-radius:18px;background:var(--card);box-shadow:0 8px 26px rgba(25,37,60,.04)}.lead{color:var(--sub);font-size:1.08rem;max-width:770px}.label{display:inline-block;margin-bottom:10px;padding:3px 9px;border-radius:999px;background:#eeecff;color:var(--purple);font-size:.78rem;font-weight:800;letter-spacing:.06em}.warning{border-left:5px solid #efa82a;background:#fffaf0}.warning strong{color:#805200}.key{border-left:5px solid var(--purple)}code{padding:2px 5px;border-radius:5px;background:#edf1f6;color:#26354d;font:.88em ui-monospace,SFMono-Regular,Menlo,monospace}pre{overflow:auto;padding:17px;border-radius:12px;background:#172238;color:#e2eaff;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}.diagram{display:grid;gap:8px;margin:15px 0}.box{padding:12px 15px;border:1px solid var(--line);border-radius:10px;background:#f8f9fc}.arrow{padding-left:18px;color:var(--purple);font-weight:800}.good{color:var(--green);font-weight:750}.bad{color:var(--red);font-weight:750}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.two>div{padding:17px;border-radius:12px;background:#f7f8fb}ol{padding-left:22px}li{margin:9px 0}table{width:100%;border-collapse:collapse;font-size:.94rem}th,td{padding:12px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--sub);font-size:.78rem;letter-spacing:.05em;text-transform:uppercase}@media(max-width:650px){main{width:min(100% - 20px,1000px);padding-top:28px}section{padding:20px}.two{grid-template-columns:1fr}table{display:block;overflow:auto}}
+  </style>
+</head>
+<body>
+  <main>
+    <span class="label">FOCUS: IN-MEMORY DATA</span>
+    <h1>추가·삭제할 때 데이터는<br />메모리에서 어떻게 바뀌나?</h1>
+    <p class="lead">현재 앱은 파일이나 DB에 저장하지 않습니다. 화면의 모든 데이터는 React의 <code>workspace</code> 상태 하나에 올라가 있고, 버튼을 누를 때마다 <strong>기존 상태를 복제해 새 상태를 만든 뒤</strong> 교체합니다.</p>
+    <section class="key">
+      <h2>가장 먼저 잡을 한 가지</h2>
+      <p><code>Block</code>은 메모의 내용이고, <code>Branch.itemIds</code>는 그 메모가 Flow 안의 어디에 놓였는지를 나타냅니다.</p>
+      <pre>workspace.blocks  → Block ID : 메모 내용<br />flow.branches.get(branchId).itemIds → 메모의 순서/위치<br /><br />blocks: blk_a → { id, title, markdown, createdAt, updatedAt }<br />itemIds: ["blk_a", "blk_b", "blk_c"]</pre>
+      <p>따라서 Block을 추가/삭제할 때는 <strong>내용 Map</strong>과 <strong>위치 배열</strong>을 함께 바꿔야 합니다. 하나만 바꾸면 고아 데이터 또는 깨진 참조가 생깁니다.</p>
+    </section>
+    <section>
+      <h2>앱이 시작될 때: 빈 메모리</h2>
+      <p><code>App.tsx</code>의 첫 상태는 <code>createWorkspace()</code>입니다.</p>
+      <pre>{ blocks: new Map(), flows: new Map(), activeFlowId: undefined, selectedBlockId: undefined }</pre>
+      <p>새 Flow를 만들면 root Branch가 하나 생기지만 아직 Block은 없습니다. 새로고침/앱 종료 뒤에는 이 함수가 다시 실행되므로 모든 데이터가 빈 상태로 돌아갑니다.</p>
+    </section>
+    <section>
+      <h2>공통 규칙: 원본을 바로 바꾸지 않고 새 Workspace를 만든다</h2>
+      <div class="diagram"><div class="box">1. UI 이벤트: “다음 노드 추가” 버튼 클릭</div><div class="arrow">↓</div><div class="box">2. <code>App.tsx</code>의 <code>runCommand</code>가 현재 <code>workspace</code>를 도메인 함수에 전달</div><div class="arrow">↓</div><div class="box">3. <code>flow.ts</code>의 <code>cloneWorkspace</code>가 Map·배열을 복제</div><div class="arrow">↓</div><div class="box">4. 복제본만 수정하고 <code>{ workspace: next }</code>를 반환</div><div class="arrow">↓</div><div class="box">5. <code>setWorkspace(next)</code>: React가 새 데이터로 화면을 다시 렌더링</div></div>
+      <p>이 규칙 덕분에 수정 전과 수정 후 상태가 섞이지 않습니다. 나중에 Undo/Redo를 만들 때도 이 구조가 기반이 됩니다.</p>
+    </section>
+    <section>
+      <h2>Block 추가: 실제로 바뀌는 데이터</h2>
+      <p><code>createBlockAfter(workspace, flowId, afterBlockId?)</code>가 담당합니다.</p>
+      <div class="two"><div><h3>추가 전</h3><pre>blocks: blk_a, blk_b<br />root.itemIds: ["blk_a", "blk_b"]</pre></div><div><h3>blk_a 뒤에 추가 후</h3><pre>blocks: blk_a, blk_new, blk_b<br />root.itemIds: ["blk_a", "blk_new", "blk_b"]<br />selectedBlockId: "blk_new"</pre></div></div>
+      <ol><li><code>buildLocationIndex</code>로 <code>afterBlockId</code>가 속한 Branch와 배열 인덱스를 찾습니다.</li><li>그 Branch의 <code>itemIds.splice(insertAt, 0, blockId)</code>로 새 ID를 끼워 넣습니다.</li><li><code>blocks.set(blockId, { markdown: "", createdAt, updatedAt })</code>로 빈 내용 Block을 만듭니다.</li><li><code>selectedBlockId</code>를 새 ID로 설정합니다.</li></ol>
+      <p class="good">정상적인 추가는 위치 배열과 내용 Map을 한 명령 안에서 같이 바꾸므로 고아 Block을 만들지 않습니다.</p>
+    </section>
+    <section>
+      <h2>Branch 추가: Block 하나와 Branch 하나를 동시에 만든다</h2>
+      <p><code>createBranchWithBlock(workspace, flowId, parentBlockId)</code>는 다음 세 곳을 수정합니다.</p>
+      <pre>1. flow.branches에 새 Branch 추가: { parentBranchId, parentBlockId, itemIds: ["새 Block"] }<br />2. 부모 Branch의 childBranchIdsByBlockId에 새 Branch ID 연결<br />3. workspace.blocks에 첫 빈 Block 추가</pre>
+      <p>즉 “갈래 만들기”는 선만 추가하는 기능이 아닙니다. 바로 쓸 수 있는 첫 빈 메모까지 함께 생성합니다.</p>
+    </section>
+    <section class="warning">
+      <h2>삭제: 현재 코드에서 반드시 알아야 할 핵심</h2>
+      <p><strong>함수 이름은 <code>deleteBlockSubtree</code>지만, 현재 동작은 선택한 Block 하나와 하위 가지 하나만 지우는 것이 아닙니다.</strong></p>
+      <pre>선택한 Branch의 itemIds가 [A, B, C, D]이고 B를 삭제하면<br /><br />현재 결과: [A]<br />삭제 대상: B, C, D 그리고 B/C/D에서 시작한 모든 하위 Branch<br /><br />즉, B “이후의 같은 줄 흐름”도 함께 삭제됩니다.</pre>
+      <p>근거는 <code>flow.ts</code>의 <code>removedItemIds = branch.itemIds.slice(location.index)</code>입니다. B의 인덱스부터 배열 끝까지 잘라냅니다.</p>
+      <p class="bad">설계 문서의 “해당 Block과 하위 Branch 전체 삭제”를 “선택 Block만 + 그 하위 Branch만 삭제”로 해석했다면, 현재 구현은 요구와 다릅니다. 이것이 추가/삭제 구조에서 가장 먼저 결정하거나 고쳐야 할 문제입니다.</p>
+    </section>
+    <section>
+      <h2>현재 삭제가 실제로 하는 일</h2>
+      <ol><li>선택 Block의 위치를 찾습니다.</li><li>그 Block부터 해당 Branch의 마지막 Block까지 <code>removedItemIds</code>로 수집합니다.</li><li>각 삭제 Block 아래의 Branch를 재귀 순회해 삭제할 Block ID와 Branch ID를 모읍니다.</li><li>원래 Branch의 <code>itemIds</code>를 선택 Block <em>앞까지만</em> 남깁니다.</li><li><code>workspace.blocks.delete(id)</code>로 모은 모든 내용 Block을 제거합니다.</li><li><code>flow.branches.delete(id)</code>로 모은 하위 Branch를 제거합니다.</li><li>삭제 뒤 Branch가 비었고 root가 아니면 부모의 연결 목록에서도 그 빈 Branch를 제거합니다.</li><li><code>selectedBlockId</code>를 비웁니다. UI도 편집 중인 Block ID를 비웁니다.</li></ol>
+      <p>삭제 후에도 남아 있는 Block이 반드시 어떤 Branch에 한 번만 배치되어 있는지 <code>validateWorkspace</code>가 검사합니다.</p>
+    </section>
+    <section>
+      <h2>데이터 관점에서 확인해야 할 문제 목록</h2>
+      <table><thead><tr><th>질문</th><th>현재 답</th><th>결정/개선 방향</th></tr></thead><tbody><tr><td>삭제는 어디까지인가?</td><td>선택 Block부터 같은 Branch의 끝 + 모든 하위 Branch</td><td>“선택 Block과 그 하위 Branch만”이 목표라면 삭제 알고리즘을 바꿔야 합니다.</td></tr><tr><td>삭제한 데이터는 복구 가능한가?</td><td>아니요. 메모리 Map에서 즉시 제거됩니다.</td><td>Trash 또는 Undo를 추가하기 전에는 되돌릴 수 없습니다.</td></tr><tr><td>화면 위치 데이터도 삭제되는가?</td><td>아니요. <code>nodePositionsByFlow</code>에 오래된 ID가 남습니다.</td><td>현재 화면에는 영향이 작지만, 저장/대형 Flow 전에는 정리 로직이 필요합니다.</td></tr><tr><td>앱을 닫아도 남는가?</td><td>아니요. 모든 상태가 React 메모리뿐입니다.</td><td>저장 기능은 Workspace와 별도 UI 위치 상태를 어떤 형식으로 저장할지 결정해야 합니다.</td></tr><tr><td>Block이 두 위치에 나타날 수 있는가?</td><td>명령은 그렇게 만들지 않으며 검증 함수가 중복을 잡습니다.</td><td>새 이동/복제 기능도 이 불변 조건을 지켜야 합니다.</td></tr></tbody></table>
+    </section>
+    <section>
+      <h2>이제부터 코드를 읽는 가장 좋은 방법</h2>
+      <ol><li><code>application/src/domain/flow.test.ts</code> 첫 테스트를 열어 A → B → C와 Branch를 만드는 흐름을 따라갑니다.</li><li>각 줄에서 호출하는 <code>createBlockAfter</code>, <code>createBranchWithBlock</code>, <code>deleteBlockSubtree</code>만 <code>flow.ts</code>에서 찾아 읽습니다.</li><li>각 함수마다 “어느 Map이 바뀌나?”, “어느 배열이 바뀌나?”, “참조를 끊거나 연결하는 Map은 무엇인가?” 세 질문에 답합니다.</li><li>마지막으로 <code>validateWorkspace</code>가 그 결과를 왜 정상이라고 판단하는지 확인합니다.</li></ol>
+      <p class="good">다음으로 해결할 한 가지를 고른다면: 삭제의 정확한 제품 규칙을 먼저 확정하는 것이 좋습니다. 그 결정이 Trash/Undo/저장/캔버스 정리 방식까지 전부 바꿉니다.</p>
+    </section>
+  </main>
+</body>
+</html>

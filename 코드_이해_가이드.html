@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flow Memo 코드 이해 가이드</title>
+  <style>
+    :root { --ink:#172033; --muted:#637087; --line:#dfe5ee; --paper:#f7f8fb; --card:#fff; --brand:#4d46e5; --accent:#f0efff; --good:#097a5b; }
+    * { box-sizing:border-box; } body { margin:0; color:var(--ink); background:var(--paper); font:16px/1.7 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(1080px,calc(100% - 32px)); margin:auto; padding:52px 0 80px; } h1,h2,h3 { line-height:1.25; letter-spacing:-.03em; } h1 { margin:0 0 14px; font-size:clamp(2rem,5vw,3.4rem); } h2 { margin:0 0 18px; font-size:1.45rem; } h3 { margin:0 0 8px; font-size:1rem; } p { margin:0 0 14px; }
+    .lead { max-width:720px; color:var(--muted); font-size:1.08rem; } .tag { display:inline-block; margin-bottom:12px; padding:4px 10px; border-radius:999px; color:var(--brand); background:var(--accent); font-size:.78rem; font-weight:750; letter-spacing:.05em; }
+    section { margin-top:28px; padding:28px; border:1px solid var(--line); border-radius:18px; background:var(--card); box-shadow:0 10px 30px rgba(24,34,55,.04); } .notice { border-left:4px solid #f0ac2e; background:#fffaf0; }
+    .flow { display:grid; grid-template-columns:repeat(5,1fr); align-items:center; gap:10px; margin-top:18px; } .flow div { padding:13px 10px; border-radius:10px; background:#f1f4f9; text-align:center; font-size:.9rem; font-weight:700; } .flow i { color:var(--brand); text-align:center; font-size:1.4rem; font-style:normal; }
+    .steps { counter-reset:step; display:grid; gap:12px; padding:0; list-style:none; } .steps li { position:relative; min-height:60px; padding:14px 16px 14px 62px; border-radius:12px; background:#f7f8fb; } .steps li::before { counter-increment:step; content:counter(step); position:absolute; left:16px; top:15px; display:grid; width:30px; height:30px; place-items:center; border-radius:50%; color:#fff; background:var(--brand); font-weight:800; }
+    .path { color:var(--brand); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.9em; font-weight:700; } .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(235px,1fr)); gap:14px; } .file { padding:17px; border:1px solid var(--line); border-radius:12px; } .file p { color:var(--muted); font-size:.92rem; }
+    table { width:100%; border-collapse:collapse; font-size:.92rem; } th,td { padding:13px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; } th { color:var(--muted); font-size:.78rem; letter-spacing:.04em; text-transform:uppercase; } code { padding:2px 5px; border-radius:5px; background:#eef1f6; color:#26344d; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.88em; } pre { overflow:auto; margin:14px 0 0; padding:17px; border-radius:12px; color:#dfe8ff; background:#182238; font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; }
+    .question { padding:14px; border-radius:10px; background:#edf9f5; color:#175c49; } .status { color:var(--good); font-weight:700; } @media (max-width:680px) { main { width:min(100% - 20px,1080px); padding-top:30px; } section { padding:20px; } .flow { grid-template-columns:1fr; } .flow i { transform:rotate(90deg); } table { display:block; overflow:auto; } }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="tag">CURRENT CODE MAP · 2026-07-21</span>
+    <h1>Flow Memo, 어디서부터 읽을까?</h1>
+    <p class="lead">이 프로젝트의 핵심은 “생각 카드(Block)를 순서와 갈래(Branch)로 묶는 트리”입니다. UI를 먼저 따라가기보다, 그 트리를 안전하게 바꾸는 규칙부터 이해하면 이후 기능을 판단하기 쉬워집니다.</p>
+
+    <section class="notice">
+      <h2>먼저 알아둘 현재 상태</h2>
+      <p>앱은 React + TypeScript로 동작하며 Tauri 껍데기를 갖고 있습니다. 하지만 메모, Flow, 캔버스 위치는 모두 <strong>브라우저 메모리</strong>에만 있습니다. 새로고침하거나 앱을 종료하면 사라집니다. Rust 쪽의 <code>greet</code> 명령은 현재 화면에서 호출되지 않습니다.</p>
+      <p>설계 문서에는 “Canvas는 후속 단계”라고 적힌 부분이 있지만, 실제 구현에는 이미 Canvas UI가 들어가 있습니다. 코드를 읽을 때는 <strong>실제 코드가 현재 동작</strong>, 문서는 <strong>의도와 다음 단계</strong>라고 분리해 보세요.</p>
+    </section>
+
+    <section>
+      <h2>한 장으로 보는 실행 흐름</h2>
+      <div class="flow" aria-label="실행 흐름"><div><span class="path">main.tsx</span><br />React 시작</div><i>→</i><div><span class="path">App.tsx</span><br />화면·상태·이벤트</div><i>→</i><div><span class="path">domain/flow.ts</span><br />트리 규칙·명령</div></div>
+      <pre>버튼 클릭 → App의 addAfter / createBranch / saveBlock 같은 핸들러
+→ flow.ts의 createBlockAfter / createBranchWithBlock / updateBlock
+→ 새 WorkspaceState 반환 → setWorkspace(새 상태) → React가 화면을 다시 그림</pre>
+      <p>가장 중요한 경계는 이것입니다: <code>App.tsx</code>는 “사용자 행동을 받는 곳”, <code>flow.ts</code>는 “그 행동이 구조를 망가뜨리지 않게 만드는 곳”입니다.</p>
+    </section>
+
+    <section>
+      <h2>추천 읽기 순서 — 한 번에 다 읽지 않기</h2>
+      <ol class="steps">
+        <li><strong><span class="path">application/src/domain/flow.test.ts</span></strong><br />테스트를 먼저 읽어 “이 앱이 반드시 지켜야 할 행동”을 예시로 파악합니다. 생성 → 분기 → 이동 → 삭제의 한 시나리오가 들어 있습니다.</li>
+        <li><strong><span class="path">application/src/domain/flow.ts</span> 1–253행</strong><br />타입과 생성/수정 명령을 읽습니다. 특히 <code>WorkspaceState</code>, <code>Flow</code>, <code>Branch</code>, <code>Block</code>의 관계를 종이에 그려보세요.</li>
+        <li><strong><span class="path">application/src/domain/flow.ts</span> 255–479행</strong><br />이동·삭제·검증을 읽습니다. 여기서 “자기 하위 Branch로 이동 금지”와 “삭제는 이후 노드와 하위 가지까지 포함” 규칙을 확인합니다.</li>
+        <li><strong><span class="path">application/src/App.tsx</span></strong><br />React 상태와 <code>runCommand</code>, 컴포넌트를 조립하는 방식을 봅니다. UI가 도메인 함수를 어떻게 부르는지가 보입니다.</li>
+        <li><strong><span class="path">application/src/components/FlowCanvas.tsx</span></strong><br />그 다음에 Canvas를 읽습니다. 트리 데이터를 화면의 행(lane), 노드, SVG 연결선으로 바꾸는 표현 계층입니다.</li>
+        <li><strong><span class="path">application/src/App.css</span></strong><br />마지막에 읽습니다. 동작 규칙이 아니라 보이는 방식만 정의합니다.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>핵심 데이터 모델</h2>
+      <pre>WorkspaceState
+├─ blocks: Map&lt;BlockId, Block&gt;     # 메모 내용 원본
+├─ flows: Map&lt;FlowId, Flow&gt;         # 생각의 트리들
+├─ activeFlowId                      # 현재 열어 둔 Flow
+└─ selectedBlockId                   # 현재 선택한 Block
+
+Flow → rootBranchId + branches: Map&lt;BranchId, Branch&gt;
+Branch → itemIds: BlockId[] + childBranchIdsByBlockId</pre>
+      <p><strong>Block에는 내용만</strong> 있고, “어느 Flow의 몇 번째인가”는 <strong>Branch의 <code>itemIds</code></strong>에 있습니다. 이 분리가 가장 중요한 설계 결정입니다.</p>
+      <div class="question"><strong>읽으며 답해 볼 질문:</strong> B 아래에 새 갈래를 만들면, 새 Block은 어디에 들어가고 B와 새 Branch의 연결 정보는 어디에 저장될까? → <code>createBranchWithBlock</code>에서 확인하세요.</div>
+    </section>
+
+    <section>
+      <h2>파일별 역할</h2>
+      <table>
+        <thead><tr><th>파일</th><th>역할</th><th>지금 읽을 포인트</th></tr></thead>
+        <tbody>
+          <tr><td><span class="path">application/src/main.tsx</span></td><td>React 앱의 진입점. <code>App</code>을 HTML의 <code>#root</code>에 연결합니다.</td><td>실행 시작 위치를 확인하는 정도면 충분합니다.</td></tr>
+          <tr><td><span class="path">application/src/App.tsx</span></td><td>앱 상태와 명령 실행을 맡고, Sidebar·Canvas·편집기를 조립합니다.</td><td><code>runCommand</code>와 각 핸들러가 <code>flow.ts</code>를 호출하는 방식을 먼저 봅니다.</td></tr>
+          <tr><td><span class="path">application/src/components/FlowCanvas.tsx</span></td><td>트리를 Canvas·노드·연결선으로 렌더링하고, 드래그 좌표를 다룹니다.</td><td>도메인 구조를 화면 좌표와 SVG 선으로 표현하는 방식을 봅니다.</td></tr>
+          <tr><td><span class="path">application/src/components/Sidebar.tsx</span></td><td>Flow 생성, 목록 선택, 트리 검증 결과를 보여 줍니다.</td><td>자체 입력 상태는 갖지만, 실제 Flow 생성은 App에 요청합니다.</td></tr>
+          <tr><td><span class="path">application/src/components/NodeEditor.tsx</span></td><td>선택한 Block의 편집·이동·삭제 UI를 맡습니다.</td><td>데이터 변경은 직접 하지 않고 App에 콜백으로 요청합니다.</td></tr>
+          <tr><td><span class="path">application/src/domain/flow.ts</span></td><td>도메인 모델과 모든 구조 변경 명령. 앱의 규칙을 가진 핵심 파일입니다.</td><td>각 명령이 기존 상태를 복제한 뒤 새 상태를 반환한다는 점, <code>validateWorkspace</code>의 불변 조건을 봅니다.</td></tr>
+          <tr><td><span class="path">application/src/domain/flow.test.ts</span></td><td>핵심 트리 규칙의 자동 테스트(Vitest).</td><td>새 기능을 만들 때 같은 방식으로 먼저 실패하는 테스트를 적을 수 있습니다.</td></tr>
+          <tr><td><span class="path">application/src/App.css</span></td><td>사이드바, 캔버스, 노드, 편집 패널의 스타일과 레이아웃.</td><td>CSS 변수와 클래스명이 <code>App.tsx</code>의 구조와 어떻게 맞물리는지 봅니다.</td></tr>
+          <tr><td><span class="path">application/package.json</span></td><td>의존성과 명령어. <code>npm run dev</code>, <code>npm test</code>, <code>npm run build</code>를 정의합니다.</td><td>실행·테스트·빌드 명령의 출처입니다.</td></tr>
+          <tr><td><span class="path">application/src-tauri/src/lib.rs</span></td><td>데스크톱 앱(Tauri)의 Rust 진입 로직. 현재는 기본 <code>greet</code>만 등록돼 있습니다.</td><td>저장 기능을 붙일 때 파일 시스템 명령을 여기에 추가할 가능성이 큽니다.</td></tr>
+          <tr><td><span class="path">application/src-tauri/tauri.conf.json</span></td><td>창 크기, 앱 이름·번들 등 Tauri 설정.</td><td>앱 동작 규칙보다 배포/창 설정입니다.</td></tr>
+          <tr><td><span class="path">docs/구현.md</span></td><td>저장 구조와 장기 설계 문서.</td><td>현재 코드와 다른 계획은 “구현 누락”인지 “방향 전환”인지 확인하는 기준입니다.</td></tr>
+          <tr><td><span class="path">plan.md</span></td><td>1차 목표와 불변 조건, 단계별 계획.</td><td>새 기능이 지금 단계의 범위에 맞는지 판단할 때 사용합니다.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>코드에서 특히 주의할 지점</h2>
+      <div class="grid">
+        <article class="file"><h3>1. <code>cloneWorkspace</code></h3><p>명령은 원래 상태를 직접 바꾸지 않기 위해 Map·배열을 복제합니다. React가 변경을 안정적으로 감지하도록 하는 현재 프로젝트의 상태 갱신 규칙입니다.</p></article>
+        <article class="file"><h3>2. 삭제의 의미</h3><p><code>deleteBlockSubtree</code>는 선택 Block 하나만 지우지 않습니다. 같은 Branch에서 그 뒤에 이어지는 Block과 그들의 하위 Branch까지 삭제합니다. UI 문구도 이 규칙을 명확히 해야 합니다.</p></article>
+        <article class="file"><h3>3. Canvas 위치는 구조가 아님</h3><p><code>nodePositionsByFlow</code>는 <code>App.tsx</code> 안의 UI 상태입니다. 노드를 드래그해도 Flow의 순서나 Branch 관계는 바뀌지 않습니다. 또한 저장되지 않습니다.</p></article>
+        <article class="file"><h3>4. 검증은 안전망</h3><p><code>validateWorkspace</code>는 중복 배치, 고아 Block, 끊긴 Branch, 부모 불일치를 문자열 오류로 돌려줍니다. 새로운 구조 명령은 이 규칙을 깨지 않아야 합니다.</p></article>
+      </div>
+    </section>
+
+    <section>
+      <h2>다음 기능을 고민하는 방법</h2>
+      <p>기능 요청을 바로 UI 코드로 옮기지 말고, 아래 순서로 생각해 보세요.</p>
+      <ol class="steps">
+        <li><strong>사용자 행동을 문장으로 쓴다.</strong><br />예: “사용자가 앱을 닫아도 Flow와 Block이 복원된다.”</li>
+        <li><strong>변하는 데이터와 지켜야 할 규칙을 찾는다.</strong><br />이 예시라면 <code>WorkspaceState</code>를 읽고/쓰는 저장 형식, 실패 시 원본 보존, UI 좌표 저장 여부가 쟁점입니다.</li>
+        <li><strong>도메인 명령과 테스트를 먼저 정한다.</strong><br />UI와 무관하게 저장 전후의 Workspace가 같은 구조인지 테스트할 수 있어야 합니다.</li>
+        <li><strong>그 뒤에 App과 Tauri의 책임을 나눈다.</strong><br />App은 저장 상태와 버튼을 보여주고, Tauri/Rust는 사용자 디스크 입출력을 담당합니다.</li>
+      </ol>
+      <p class="status">첫 학습 목표: Flow 하나를 만들고 Block 3개와 Branch 1개를 추가한 뒤, 실제로 어떤 함수가 어떤 순서로 호출되는지 위 읽기 순서대로 추적해 보기.</p>
+    </section>
+  </main>
+</body>
+</html>
