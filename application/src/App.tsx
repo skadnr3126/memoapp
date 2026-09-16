@@ -1,22 +1,22 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   BlockId,
-  BranchId,
   CommandResult,
   WorkspaceState,
   createBlockAfter,
   createBranchWithBlock,
   createFlow,
   createWorkspace,
-  deleteBlockSubtree,
-  moveBlock,
-  moveBlockByOffset,
+  deleteBlock,
+  deleteFlow,
   renameFlow,
   updateBlock,
   validateWorkspace,
 } from "./domain/flow";
 import { FlowCanvas } from "./components/FlowCanvas";
-import { NodeEditor } from "./components/NodeEditor";
+import { EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, type EditorSaveRequest, type EditorSession } from "./editorProtocol";
 import { Sidebar } from "./components/Sidebar";
 import {
   NodePositionsByFlow,
@@ -31,10 +31,6 @@ import "./App.css";
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => createWorkspace());
   const [message, setMessage] = useState("새 Flow를 만들어 구조를 시작하세요.");
-  const [editingBlockId, setEditingBlockId] = useState<BlockId>();
-  const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [draftTitle, setDraftTitle] = useState("");
-  const [draftMarkdown, setDraftMarkdown] = useState("");
   const [nodePositionsByFlow, setNodePositionsByFlow] = useState<NodePositionsByFlow>({});
   const [selectedBlockIds, setSelectedBlockIds] = useState<BlockId[]>([]);
   const [workspaceRoot, setWorkspaceRoot] = useState<string>();
@@ -44,10 +40,45 @@ function App() {
   const hydratedRef = useRef(false);
   const saveSequenceRef = useRef(Promise.resolve());
   const sidebarResizeRef = useRef<{ pointerId: number; startX: number; startWidth: number } | undefined>(undefined);
+  const editorReadyRef = useRef(false);
+  const editorOpeningRef = useRef<Promise<void> | undefined>(undefined);
+  const editorSessionRef = useRef<EditorSession | undefined>(undefined);
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
 
   const activeFlow = workspace.activeFlowId ? workspace.flows.get(workspace.activeFlowId) : undefined;
-  const editingBlock = editingBlockId ? workspace.blocks.get(editingBlockId) : undefined;
   const validationErrors = useMemo(() => validateWorkspace(workspace), [workspace]);
+
+  const sendEditorSession = async (session: EditorSession) => {
+    editorSessionRef.current = session;
+    if (!editorReadyRef.current || !isDesktopRuntime()) return;
+    await emitTo("editor", EDITOR_LOAD, session);
+  };
+
+  const ensureEditorWindow = async () => {
+    if (!isDesktopRuntime()) return;
+    const existing = await WebviewWindow.getByLabel("editor");
+    if (existing) return;
+    if (editorOpeningRef.current) return editorOpeningRef.current;
+
+    editorReadyRef.current = false;
+    const opening = new Promise<void>((resolve, reject) => {
+      const editor = new WebviewWindow("editor", {
+        url: "index.html#editor",
+        title: "Node Editor",
+        width: 720,
+        height: 900,
+      });
+      void editor.once("tauri://created", () => resolve());
+      void editor.once("tauri://error", ({ payload }) => reject(payload));
+    });
+    editorOpeningRef.current = opening;
+    try {
+      await opening;
+    } finally {
+      editorOpeningRef.current = undefined;
+    }
+  };
 
   const openWorkspace = async (path: string) => {
     setStorageState("loading");
@@ -59,8 +90,6 @@ function App() {
       setNodePositionsByFlow(loaded.nodePositionsByFlow);
       setSelectedBlockIds([]);
       setWorkspaceRoot(loaded.workspaceRoot);
-      setEditingBlockId(undefined);
-      setIsEditorOpen(false);
       setMessage(loaded.recoveryNotice ?? "작업공간을 열었습니다.");
       setStorageState("ready");
       hydratedRef.current = true;
@@ -138,6 +167,75 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!isDesktopRuntime()) return;
+
+    let unlisten: UnlistenFn | undefined;
+    let disposed = false;
+    void listen<EditorSaveRequest>(EDITOR_SAVE, ({ payload }) => {
+      try {
+        const result = updateBlock(workspaceRef.current, payload.blockId, {
+          title: payload.title,
+          markdown: payload.markdown,
+        });
+        workspaceRef.current = result.workspace;
+        setWorkspace(result.workspace);
+        setMessage("노드 내용 저장 완료");
+        const block = result.workspace.blocks.get(payload.blockId);
+        if (block) {
+          void sendEditorSession({
+            blockId: block.id,
+            title: block.title ?? "",
+            markdown: block.markdown,
+            updatedAt: block.updatedAt,
+          });
+        }
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "노드 내용을 저장하지 못했습니다.");
+      }
+    }).then((stop) => {
+      if (disposed) {
+        void stop();
+        return;
+      }
+      unlisten = stop;
+    });
+
+    return () => {
+      disposed = true;
+      void unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDesktopRuntime()) return;
+
+    let unlisten: UnlistenFn | undefined;
+    let disposed = false;
+    void listen(EDITOR_READY, () => {
+      editorReadyRef.current = true;
+      const session = editorSessionRef.current;
+      if (session) void sendEditorSession(session);
+    }).then((stop) => {
+      if (disposed) {
+        void stop();
+        return;
+      }
+      unlisten = stop;
+    });
+
+    return () => {
+      disposed = true;
+      void unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    void ensureEditorWindow().catch((error) => {
+      setMessage(error instanceof Error ? error.message : "편집 창을 열지 못했습니다.");
+    });
+  }, []);
+
+  useEffect(() => {
     if (!workspaceRoot || !hydratedRef.current || !isDesktopRuntime()) return;
     const timer = window.setTimeout(() => {
       setStorageState("saving");
@@ -173,10 +271,15 @@ function App() {
     if (!block) return;
     setWorkspace((current) => ({ ...current, selectedBlockId: blockId }));
     setSelectedBlockIds([blockId]);
-    setIsEditorOpen(true);
-    setEditingBlockId(blockId);
-    setDraftTitle(block.title ?? "");
-    setDraftMarkdown(block.markdown);
+    const session: EditorSession = {
+      blockId: block.id,
+      title: block.title ?? "",
+      markdown: block.markdown,
+      updatedAt: block.updatedAt,
+    };
+    void ensureEditorWindow()
+      .then(() => sendEditorSession(session))
+      .catch((error) => setMessage(error instanceof Error ? error.message : "편집 창을 열지 못했습니다."));
   };
 
   const addAfter = (blockId?: BlockId) => {
@@ -213,26 +316,46 @@ function App() {
       const block = current.blocks.get(blockId);
       return updateBlock(current, blockId, { title, markdown: block?.markdown ?? "" });
     });
-    if (editingBlockId === blockId) setDraftTitle(title);
   };
 
-  const saveBlock = (blockId: BlockId, title: string, markdown: string) => {
-    runCommand("노드 내용 저장", (current) => updateBlock(current, blockId, { title, markdown }));
-  };
-
-  const moveBlockToBranch = (blockId: BlockId, targetBranchId: BranchId) => {
+  const deleteSelectedBlock = (blockId: BlockId) => {
     if (!activeFlow) return;
-    runCommand("노드 이동", (current) => {
-      const targetBranch = current.flows.get(activeFlow.id)?.branches.get(targetBranchId);
-      return moveBlock(current, activeFlow.id, blockId, targetBranchId, targetBranch?.itemIds.length ?? 0);
-    });
-  };
-
-  const deleteBlock = (blockId: BlockId) => {
-    if (!activeFlow) return;
-    runCommand("노드 흐름 삭제", (current) => deleteBlockSubtree(current, activeFlow.id, blockId));
-    setEditingBlockId(undefined);
+    const result = runCommand("노드 삭제", (current) => deleteBlock(current, activeFlow.id, blockId));
+    if (!result) return;
+    const deletedBlockIds = new Set([...workspace.blocks.keys()].filter((id) => !result.workspace.blocks.has(id)));
+    setNodePositionsByFlow((current) => ({
+      ...current,
+      [activeFlow.id]: Object.fromEntries(
+        Object.entries(current[activeFlow.id] ?? {}).filter(([id]) => !deletedBlockIds.has(id)),
+      ),
+    }));
     setSelectedBlockIds([]);
+  };
+
+  useEffect(() => {
+    const deleteWithKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Delete" || event.repeat) return;
+      if (event.target instanceof Element && event.target.closest("input, textarea, [contenteditable='true']")) return;
+      if (selectedBlockIds.length !== 1) return;
+      event.preventDefault();
+      deleteSelectedBlock(selectedBlockIds[0]);
+    };
+
+    window.addEventListener("keydown", deleteWithKey);
+    return () => window.removeEventListener("keydown", deleteWithKey);
+  }, [selectedBlockIds, workspace, activeFlow]);
+
+  const deleteSelectedFlow = (flowId: string) => {
+    const flow = workspace.flows.get(flowId);
+    if (!flow || !window.confirm(`\"${flow.title}\" Flow와 내부 노드를 삭제할까요?`)) return;
+    const wasActive = flowId === activeFlow?.id;
+    const result = runCommand("Flow 삭제", (current) => deleteFlow(current, flowId));
+    if (!result) return;
+
+    setNodePositionsByFlow(({ [flowId]: _deleted, ...remaining }) => remaining);
+    if (wasActive) {
+      setSelectedBlockIds([]);
+    }
   };
 
   if (storageState === "checking" || storageState === "loading") {
@@ -272,9 +395,9 @@ function App() {
           const flow = workspace.flows.get(flowId);
           setWorkspace({ ...workspace, activeFlowId: flowId, selectedBlockId: undefined });
           setSelectedBlockIds([]);
-          setEditingBlockId(undefined);
           setMessage(`${flow?.title ?? "Flow"} 열기`);
         }}
+        onDeleteFlow={deleteSelectedFlow}
         onReturnToWorkspaceSelection={returnToWorkspaceSelection}
         onChooseWorkspace={chooseWorkspace}
       />
@@ -299,13 +422,13 @@ function App() {
                 <input className="flow-title-input" value={activeFlow.title} onChange={(event) => runCommand("Flow 이름 변경", (current) => renameFlow(current, activeFlow.id, event.currentTarget.value))} aria-label="Flow 이름" />
               </div>
               <div className="workspace-header-actions">
-                <button className="button button-quiet editor-toggle" type="button" onClick={() => setIsEditorOpen((current) => !current)}>{isEditorOpen ? "편집 창 닫기" : "편집 창 열기"}</button>
+                <button className="button button-quiet editor-toggle" type="button" onClick={() => void ensureEditorWindow().catch((error) => setMessage(error instanceof Error ? error.message : "편집 창을 열지 못했습니다."))}>편집 창 열기</button>
                 <div className={`runtime-badge ${storageState === "error" ? "has-error" : ""}`}>{storageBadge}</div>
               </div>
             </header>
             <div className="command-status" role="status">{message}</div>
             {storageError && <div className="storage-error" role="alert">{storageError} <button className="storage-retry" type="button" onClick={() => void retrySave()}>다시 시도</button></div>}
-            <div className={`flow-work-area ${isEditorOpen ? "has-editor" : ""}`}>
+            <div className="flow-work-area">
               <FlowCanvas
                 workspace={workspace}
                 flow={activeFlow}
@@ -318,24 +441,7 @@ function App() {
                 onAddAfter={addAfter}
                 onCreateBranch={createBranch}
               />
-              {isEditorOpen && (
-                <NodeEditor
-                  key={editingBlockId ?? "empty"}
-                  flow={activeFlow}
-                  block={editingBlock}
-                  draftTitle={draftTitle}
-                  draftMarkdown={draftMarkdown}
-                  onClose={() => setIsEditorOpen(false)}
-                  onDraftTitleChange={setDraftTitle}
-                  onDraftMarkdownChange={setDraftMarkdown}
-                  onSave={saveBlock}
-                  onAddAfter={addAfter}
-                  onCreateBranch={createBranch}
-                  onMoveByOffset={(blockId, offset) => runCommand(offset < 0 ? "노드 앞으로 이동" : "노드 뒤로 이동", (current) => moveBlockByOffset(current, activeFlow.id, blockId, offset))}
-                  onMove={moveBlockToBranch}
-                  onDelete={deleteBlock}
-                />
-              )}
+
             </div>
           </>
         ) : (

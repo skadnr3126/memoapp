@@ -7,7 +7,7 @@ export type Block = {
   title?: string;
   markdown: string;
   createdAt: string;
-  updatedAt: string;
+  updatedAt: string
 };
 
 export type Branch = {
@@ -419,6 +419,60 @@ export const deleteBlockSubtree = (
   }
 
   next.selectedBlockId = undefined;
+  return { workspace: next };
+};
+
+export const deleteBlock = (
+  workspace: WorkspaceState,
+  flowId: FlowId,
+  blockId: BlockId,
+): CommandResult => {
+  const next = cloneWorkspace(workspace);
+  const flow = getFlow(next, flowId);
+  const location = buildLocationIndex(next).get(blockId);
+  if (!location || location.flowId !== flowId) throw new Error("현재 Flow에 없는 Block입니다.");
+
+  const branch = getBranch(flow, location.branchId);
+  const deletedBlockIds = new Set<BlockId>([blockId]);
+  const deletedBranchIds = new Set<BranchId>();
+  (branch.childBranchIdsByBlockId.get(blockId) ?? []).forEach((childBranchId) =>
+    collectBranchContents(flow, childBranchId, deletedBlockIds, deletedBranchIds),
+  );
+
+  branch.itemIds = branch.itemIds.filter((id) => id !== blockId);
+  branch.childBranchIdsByBlockId.delete(blockId);
+  deletedBlockIds.forEach((id) => next.blocks.delete(id));
+  deletedBranchIds.forEach((id) => flow.branches.delete(id));
+
+  if (branch.id !== flow.rootBranchId && branch.itemIds.length === 0) {
+    const parentBranch = getBranch(flow, branch.parentBranchId as BranchId);
+    const siblings = parentBranch.childBranchIdsByBlockId.get(branch.parentBlockId as BlockId) ?? [];
+    parentBranch.childBranchIdsByBlockId.set(
+      branch.parentBlockId as BlockId,
+      siblings.filter((id) => id !== branch.id),
+    );
+    flow.branches.delete(branch.id);
+  }
+
+  if (next.selectedBlockId && deletedBlockIds.has(next.selectedBlockId)) next.selectedBlockId = undefined;
+  return { workspace: next };
+};
+
+export const deleteFlow = (workspace: WorkspaceState, flowId: FlowId): CommandResult => {
+  const next = cloneWorkspace(workspace);
+  const flow = getFlow(next, flowId);
+  const deletedBlockIds = new Set<BlockId>();
+
+  flow.branches.forEach((branch) => branch.itemIds.forEach((blockId) => deletedBlockIds.add(blockId)));
+  deletedBlockIds.forEach((blockId) => next.blocks.delete(blockId));
+  next.flows.delete(flowId);
+
+  if (next.activeFlowId === flowId) {
+    const [nextFlowId] = next.flows.keys();
+    next.activeFlowId = nextFlowId;
+  }
+  if (next.selectedBlockId && deletedBlockIds.has(next.selectedBlockId)) next.selectedBlockId = undefined;
+
   return { workspace: next };
 };
 

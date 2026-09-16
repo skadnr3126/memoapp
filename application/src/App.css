@@ -68,13 +68,15 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 
 .flow-list { display: grid; gap: 6px; }
 .flow-list .section-label { margin-bottom: 4px; }
+.flow-list-row { display: flex; gap: 6px; }
 .flow-list-item {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 10px;
+  display: flex; flex: 1; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding: 10px;
   border: 1px solid transparent; border-radius: 8px; color: #cfd9d1; background: transparent; text-align: left;
 }
 .flow-list-item:hover, .flow-list-item.is-active { border-color: #496356; color: #f4f9f2; background: #2b3b34; }
 .flow-list-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flow-list-item small { color: #91a99a; font-size: .66rem; white-space: nowrap; }
+.flow-delete-button { flex: none; padding-inline: 8px; }
 .sidebar-footer { display: grid; gap: 12px; margin-top: auto; }
 .workspace-switcher, .validation-panel { padding: 13px; border: 1px solid #40584c; border-radius: 10px; color: #b8ddbd; background: #25352e; font-size: .75rem; }
 .workspace-path { margin: 8px 0; overflow: hidden; color: #c9d7ce; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
@@ -103,7 +105,6 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .storage-retry { margin-left: 6px; padding: 2px 6px; border: 1px solid #d69a92; border-radius: 5px; color: inherit; background: #fff4f2; font-size: inherit; font-weight: 700; }
 
 .flow-work-area { max-width: 1400px; margin: 0 auto; }
-.flow-work-area.has-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 390px); align-items: start; gap: 20px; }
 .flow-work-area .flow-canvas-scroll { max-width: none; margin: 0; }
 
 .flow-canvas-scroll {
@@ -186,8 +187,6 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   .validation-panel { margin-top: 0; }
   .workspace { padding: 28px 18px 42px; }
   .workspace-header { align-items: start; flex-direction: column; }
-  .flow-work-area.has-editor { grid-template-columns: 1fr; }
-  .flow-work-area .node-editor { position: relative; top: auto; max-height: none; }
 }
 
 @media (max-width: 560px) {

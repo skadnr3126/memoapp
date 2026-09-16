@@ -4,6 +4,8 @@ import {
   createBranchWithBlock,
   createFlow,
   createWorkspace,
+  deleteBlock,
+  deleteFlow,
   deleteBlockSubtree,
   getDisplayTitle,
   moveBlock,
@@ -67,6 +69,42 @@ describe("Flow domain commands", () => {
     expect(() =>
       moveBlock(workspace, createdFlow.flowId, parent.blockId, childBranch.branchId, 0),
     ).toThrow("하위 Branch");
+  });
+
+  it("deletes only the selected Block and its child branches", () => {
+    let workspace = createWorkspace();
+    const createdFlow = createFlow(workspace, "삭제");
+    workspace = createdFlow.workspace;
+    const first = createBlockAfter(workspace, createdFlow.flowId);
+    workspace = first.workspace;
+    const second = createBlockAfter(workspace, createdFlow.flowId, first.blockId);
+    workspace = second.workspace;
+    const childBranch = createBranchWithBlock(workspace, createdFlow.flowId, first.blockId);
+    workspace = childBranch.workspace;
+
+    workspace = deleteBlock(workspace, createdFlow.flowId, first.blockId).workspace;
+
+    expect(workspace.blocks.has(first.blockId)).toBe(false);
+    expect(workspace.blocks.has(childBranch.blockId)).toBe(false);
+    expect(workspace.blocks.has(second.blockId)).toBe(true);
+    expect(validateWorkspace(workspace)).toEqual([]);
+  });
+
+  it("deletes a Flow, its Blocks, and activates the remaining Flow", () => {
+    let workspace = createWorkspace();
+    const firstFlow = createFlow(workspace, "첫 Flow");
+    workspace = createBlockAfter(firstFlow.workspace, firstFlow.flowId).workspace;
+    const secondFlow = createFlow(workspace, "둘 Flow");
+    workspace = secondFlow.workspace;
+    const secondBlock = createBlockAfter(workspace, secondFlow.flowId);
+    workspace = secondBlock.workspace;
+
+    workspace = deleteFlow(workspace, secondFlow.flowId).workspace;
+
+    expect(workspace.flows.has(secondFlow.flowId)).toBe(false);
+    expect(workspace.blocks.has(secondBlock.blockId)).toBe(false);
+    expect(workspace.activeFlowId).toBe(firstFlow.flowId);
+    expect(validateWorkspace(workspace)).toEqual([]);
   });
 
   it("keeps an explicit title separate from Markdown and derives a title when absent", () => {

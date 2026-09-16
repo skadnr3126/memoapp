@@ -8,6 +8,7 @@ type SidebarProps = {
   workspaceRoot?: string;
   onCreateFlow: (title: string) => void;
   onSelectFlow: (flowId: FlowId) => void;
+  onDeleteFlow: (flowId: FlowId) => void;
   onReturnToWorkspaceSelection?: () => void;
   onChooseWorkspace?: () => void;
 };
@@ -15,7 +16,7 @@ type SidebarProps = {
 const getNodeCount = (flow: Flow) =>
   [...flow.branches.values()].reduce((count, branch) => count + branch.itemIds.length, 0);
 
-export function Sidebar({ flows, activeFlowId, validationErrors, workspaceRoot, onCreateFlow, onSelectFlow, onReturnToWorkspaceSelection ,onChooseWorkspace}: SidebarProps) {
+export function Sidebar({ flows, activeFlowId, validationErrors, workspaceRoot, onCreateFlow, onSelectFlow, onDeleteFlow, onReturnToWorkspaceSelection ,onChooseWorkspace}: SidebarProps) {
   const [newFlowTitle, setNewFlowTitle] = useState("");
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -40,9 +41,12 @@ export function Sidebar({ flows, activeFlowId, validationErrors, workspaceRoot, 
       <nav className="flow-list" aria-label="Flow 목록">
         <p className="section-label">FLOWS · {flows.length}</p>
         {flows.map((flow) => (
-          <button className={`flow-list-item ${flow.id === activeFlowId ? "is-active" : ""}`} type="button" key={flow.id} onClick={() => onSelectFlow(flow.id)}>
-            <span>{flow.title}</span><small>{getNodeCount(flow)} nodes</small>
-          </button>
+          <div className="flow-list-row" key={flow.id}>
+            <button className={`flow-list-item ${flow.id === activeFlowId ? "is-active" : ""}`} type="button" onClick={() => onSelectFlow(flow.id)}>
+              <span>{flow.title}</span><small>{getNodeCount(flow)} nodes</small>
+            </button>
+            <button className="button button-danger flow-delete-button" type="button" aria-label={`${flow.title} 삭제`} onClick={() => onDeleteFlow(flow.id)}>삭제</button>
+          </div>
         ))}
       </nav>
       <div className="sidebar-footer">

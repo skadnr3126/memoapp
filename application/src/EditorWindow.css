@@ -1,0 +1,23 @@
+.editor-window {
+  min-height: 100vh;
+  padding: 32px;
+  color: #25312a;
+  background: #f7f5f0;
+}
+
+.editor-window-header { padding-bottom: 20px; border-bottom: 1px solid #dce4d8; }
+.editor-window-eyebrow { margin: 0; color: #789286; font-size: .66rem; font-weight: 700; letter-spacing: .11em; }
+.editor-window h1 { margin: 6px 0 0; font-family: Georgia, "Noto Serif KR", serif; font-weight: 500; }
+.editor-window h1 { font-size: 2rem; }
+.editor-window-content { margin-top: 26px; }
+.editor-window-meta { margin: 0 0 10px; color: #789286; font-size: .7rem; }
+.editor-window-content label { display: grid; gap: 7px; margin-top: 16px; color: #54655a; font-size: .75rem; font-weight: 750; }
+.editor-window-content input, .editor-window-content textarea { width: 100%; padding: 10px 11px; border: 1px solid #d4d8cf; border-radius: 8px; outline: none; color: #26332a; background: #fffefb; font: 500 .9rem/1.6 "Pretendard", "Apple SD Gothic Neo", sans-serif; }
+.editor-window-content input:focus, .editor-window-content textarea:focus { border-color: #5e9c6c; box-shadow: 0 0 0 3px rgba(94, 156, 108, .14); }
+.editor-window-content textarea { min-height: 260px; resize: vertical; }
+.editor-window-content footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
+.editor-window-content small { color: #728077; font-size: .72rem; }
+.editor-window-content button { border: 0; border-radius: 7px; padding: 8px 12px; color: #f2f7f1; background: #347a4a; font-size: .78rem; font-weight: 700; cursor: pointer; }
+.editor-window-empty { display: grid; justify-items: center; gap: 8px; margin: 24vh auto 0; color: #728077; text-align: center; }
+.editor-window-empty p { margin: 0; color: #435648; font-weight: 700; }
+.editor-window-empty small { font-size: .78rem; }
