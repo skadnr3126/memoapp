@@ -1,7 +1,39 @@
-# Tauri + React + Typescript
+﻿# Flow Memo
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Tauri + React 기반 로컬 노트 앱입니다. 블록을 자유롭게 배치하고 무방향 링크로 연결합니다.
 
-## Recommended IDE Setup
+## 실행과 검증
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+```sh
+npm install
+npm run tauri dev
+npm test
+npm run build
+cd src-tauri
+cargo test
+```
+
+브라우저 개발 모드(`npm run dev`)는 메모리에서만 동작합니다. 파일 저장과 별도 편집창은 데스크톱 앱에서 사용합니다.
+
+## 블록과 연결
+
+- 새 Flow를 만들고 **블록 추가**를 누릅니다. 블록은 자동 연결되지 않습니다.
+- 블록을 드래그해 이동합니다. 빈 공간 드래그는 영역 선택, 우클릭 드래그는 패닝입니다.
+- **연결** 버튼 또는 **Ctrl+D**로 연결 모드에 들어갑니다.
+- 선택된 블록이 하나라면 첫 번째 블록으로 사용합니다. 그렇지 않으면 첫 번째 블록부터 선택합니다.
+- 클릭 또는 블록에 포커스를 두고 Enter로 대상을 지정합니다. 두 번째 블록 지정 후 **Enter를 한 번 더** 누르거나 **연결 확정**을 누릅니다.
+- 확정하면 연결 모드가 끝납니다. Esc/취소는 저장 없이 종료합니다.
+- 연결선을 선택하고 Delete 또는 연결 삭제를 누르면 선만 제거합니다.
+- 블록을 선택하고 Delete를 누르면 그 블록과 연결선만 제거합니다. 이웃 블록은 남습니다.
+
+## 저장과 이전 자료 변환
+
+`.memo/blocks/`에 Markdown, `.memo/flows/`에 Flow JSON을 저장합니다. Flow v2에는 `blocks`와 `links`가 들어갑니다. 블록 본문과 workspace는 v1, 캔버스 절대 좌표를 저장하는 layout은 v2입니다.
+
+이전 root/branches 파일을 열면 모든 깊이의 블록과 기존 화면의 연결을 변환합니다. 원본은 `.memo/backups/pre-graph-.../`에 보관합니다. 변환 중에는 정상 편집/자동 저장을 시작하지 않습니다.
+
+이전 좌표는 브랜치 배치에서의 이동량입니다. 기준 배율 1의 배치와 이동량을 합쳐 변환하므로, 이전 창 크기에서 보이던 정확한 픽셀 위치까지 재현하지는 않습니다.
+
+저장 스냅샷을 작업 기록에 먼저 남기므로 중단된 새 저장은 다음 열기에서 재개합니다. 이전 앱이 남긴 내용 없는 v1 작업 기록은 자동 복구할 수 없으며, 원본/백업 확인이 필요한 오류로 표시합니다. 지원하지 않는 버전이나 손상된 참조를 빈 데이터로 덮어쓰지 않습니다.
+
+세부 설계는 [구현 계획](../docs/flow_graph_implementation_plan.md)을 참고하세요.

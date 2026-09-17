@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundsOverlap, clampScroll, getAutoScrollDelta, getPannedScroll } from "./FlowCanvas";
+import { boundsOverlap, clampScroll, findDirectionalNeighbor, getAutoScrollDelta, getPannedScroll } from "./FlowCanvas";
 
 describe("getPannedScroll", () => {
   it("moves the viewport opposite to the right-drag direction", () => {
@@ -28,5 +28,16 @@ describe("clampScroll", () => {
     expect(clampScroll(-20, 300)).toBe(0);
     expect(clampScroll(180, 300)).toBe(180);
     expect(clampScroll(480, 300)).toBe(300);
+  });
+});
+
+describe("findDirectionalNeighbor", () => {
+  const positions = {
+    a: { x: 100, y: 100 }, b: { x: 360, y: 108 }, c: { x: 360, y: 260 }, d: { x: 100, y: 270 },
+  };
+  it("chooses the nearest node in the requested direction", () => {
+    expect(findDirectionalNeighbor("a", "ArrowRight", positions, ["a", "b", "c", "d"])).toBe("b");
+    expect(findDirectionalNeighbor("a", "ArrowDown", positions, ["a", "b", "c", "d"])).toBe("d");
+    expect(findDirectionalNeighbor("a", "ArrowLeft", positions, ["a", "b", "c", "d"])).toBeUndefined();
   });
 });

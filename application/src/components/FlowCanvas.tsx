@@ -1,7 +1,8 @@
-import { CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { BlockId, Branch, BranchId, Flow, getDisplayTitle, WorkspaceState } from "../domain/flow";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { BlockId, Flow, getDisplayTitle, WorkspaceState } from "../domain/flow";
+import { ConnectionState } from "../domain/connection";
+import { defaultPosition, linkPath, NODE_WIDTH, NODE_HEIGHT } from "../domain/layout";
 
-type FlowLane = { branch: Branch; depth: number; startColumn: number };
 export type NodePosition = { x: number; y: number };
 type PointerDrag = {
   blockIds: BlockId[];
@@ -12,13 +13,12 @@ type PointerDrag = {
   scrollLeft: number;
   scrollTop: number;
   positions: Record<BlockId, NodePosition>;
+  origin: NodePosition;
   moved: boolean;
 };
 type PanDrag = { startX: number; startY: number; scrollLeft: number; scrollTop: number };
 type SelectionDrag = { startX: number; startY: number; currentX: number; currentY: number };
 type Bounds = { left: number; top: number; right: number; bottom: number };
-type Connection = { from: BlockId; to: BlockId };
-type ConnectionPath = Connection & { d: string };
 
 export const getPannedScroll = (drag: PanDrag, pointerX: number, pointerY: number) => ({
   left: drag.scrollLeft - (pointerX - drag.startX),
@@ -36,6 +36,38 @@ export const getAutoScrollDelta = (pointer: number, start: number, end: number, 
 
 export const clampScroll = (position: number, maximum: number) => Math.max(0, Math.min(maximum, position));
 
+/** Finds the most natural neighboring node in the requested direction. */
+export const findDirectionalNeighbor = (
+  currentId: BlockId,
+  direction: "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight",
+  positions: Record<BlockId, NodePosition>,
+  ids: BlockId[],
+  heights: Record<BlockId, number> = {},
+) => {
+  const current = positions[currentId];
+  if (!current) return undefined;
+  const cx = current.x + NODE_WIDTH / 2;
+  const cy = current.y + (heights[currentId] ?? NODE_HEIGHT) / 2;
+  const candidates = ids.filter((id) => {
+    if (id === currentId || !positions[id]) return false;
+    const p = positions[id];
+    const x = p.x + NODE_WIDTH / 2, y = p.y + (heights[id] ?? NODE_HEIGHT) / 2;
+    return direction === "ArrowRight" ? x > cx : direction === "ArrowLeft" ? x < cx : direction === "ArrowDown" ? y > cy : y < cy;
+  });
+  if (!candidates.length) return undefined;
+  const horizontal = direction === "ArrowLeft" || direction === "ArrowRight";
+  return candidates.sort((a, b) => {
+    const pa = positions[a], pb = positions[b];
+    const ax = pa.x + NODE_WIDTH / 2, ay = pa.y + (heights[a] ?? NODE_HEIGHT) / 2;
+    const bx = pb.x + NODE_WIDTH / 2, by = pb.y + (heights[b] ?? NODE_HEIGHT) / 2;
+    const ap = horizontal ? Math.abs(ax - cx) : Math.abs(ay - cy);
+    const ao = horizontal ? Math.abs(ay - cy) : Math.abs(ax - cx);
+    const bp = horizontal ? Math.abs(bx - cx) : Math.abs(by - cy);
+    const bo = horizontal ? Math.abs(by - cy) : Math.abs(bx - cx);
+    return (ap + ao * 1.35) - (bp + bo * 1.35);
+  })[0];
+};
+
 type FlowCanvasProps = {
   workspace: WorkspaceState;
   flow: Flow;
@@ -45,25 +77,14 @@ type FlowCanvasProps = {
   selectedBlockIds: BlockId[];
   onSelectedBlockIdsChange: (blockIds: BlockId[]) => void;
   onNodePositionsChange: (positions: Record<BlockId, NodePosition>) => void;
-  onAddAfter: (blockId?: BlockId) => void;
-  onCreateBranch: (blockId: BlockId) => void;
-};
-
-const getFlowLanes = (flow: Flow): FlowLane[] => {
-  const lanes: FlowLane[] = [];
-  const visit = (branchId: BranchId, depth: number, startColumn: number) => {
-    const branch = flow.branches.get(branchId);
-    if (!branch) return;
-    lanes.push({ branch, depth, startColumn });
-    branch.itemIds.forEach((blockId, index) => {
-      const nextColumn = startColumn + index;
-      (branch.childBranchIdsByBlockId.get(blockId) ?? []).forEach((childBranchId) =>
-        visit(childBranchId, depth + 1, nextColumn),
-      );
-    });
-  };
-  visit(flow.rootBranchId, 0, 1);
-  return lanes;
+  connection: ConnectionState;
+  onChooseConnectionBlock: (id: BlockId) => void;
+  selectedLinkId?: string;
+  onSelectLink: (id: string) => void;
+  onCreateBlock?: (position: NodePosition) => void;
+  onDeleteBlock?: (id: BlockId) => void;
+  onDeleteLink?: (id: string) => void;
+  onBeginConnection?: (id: BlockId) => void;
 };
 
 export function FlowCanvas({
@@ -75,93 +96,83 @@ export function FlowCanvas({
   selectedBlockIds,
   onSelectedBlockIdsChange,
   onNodePositionsChange,
-  onAddAfter,
-  onCreateBranch,
+  connection, onChooseConnectionBlock, selectedLinkId, onSelectLink, onCreateBlock, onDeleteBlock, onDeleteLink, onBeginConnection,
 }: FlowCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const nodeElementsRef = useRef(new Map<BlockId, HTMLElement>());
-  const lanes = useMemo(() => getFlowLanes(flow), [flow]);
-  const widestColumn = Math.max(2, ...lanes.map((lane) => lane.startColumn + Math.max(lane.branch.itemIds.length, 1)));
-  const [scale, setScale] = useState(1);
-  const [connectionPaths, setConnectionPaths] = useState<ConnectionPath[]>([]);
-  const [canvasSize, setCanvasSize] = useState({ width: 1, height: 1 });
   const pointerDragRef = useRef<PointerDrag | undefined>(undefined);
-  const panDragRef = useRef<PanDrag | undefined>(undefined);
+  const panDragRef = useRef<(PanDrag & { moved: boolean; blockId?: BlockId; linkId?: string }) | undefined>(undefined);
+  const mouseRef = useRef<NodePosition | undefined>(undefined);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; position: NodePosition; blockId?: BlockId; linkId?: string }>();
   const selectionDragRef = useRef<SelectionDrag | undefined>(undefined);
   const autoScrollPointerRef = useRef<NodePosition | undefined>(undefined);
   const autoScrollFrameRef = useRef<number | undefined>(undefined);
   const autoScrollLimitRef = useRef<NodePosition | undefined>(undefined);
   const suppressClickRef = useRef(false);
   const [selectionDrag, setSelectionDrag] = useState<SelectionDrag>();
-  const selectedBlockIdSet = useMemo(() => new Set(selectedBlockIds), [selectedBlockIds]);
-  const connections = useMemo(() => {
-    const result: Connection[] = [];
-    for (const branch of flow.branches.values()) {
-      branch.itemIds.slice(1).forEach((blockId, index) => result.push({ from: branch.itemIds[index], to: blockId }));
-      branch.itemIds.forEach((blockId) => {
-        (branch.childBranchIdsByBlockId.get(blockId) ?? []).forEach((childBranchId) => {
-          const childBlockId = flow.branches.get(childBranchId)?.itemIds[0];
-          if (childBlockId) result.push({ from: blockId, to: childBlockId });
-        });
-      });
-    }
-    return result;
-  }, [flow]);
-  const canvasStyle = {
-    "--canvas-columns": widestColumn,
-    "--node-width": `${214 * scale}px`,
-    "--node-gap": `${48 * scale}px`,
-    "--node-height": `${94 * scale}px`,
-    "--node-padding": `${14 * scale}px`,
-    "--node-title-size": `${0.92 * scale}rem`,
-    "--node-body-size": `${0.74 * scale}rem`,
-    "--node-meta-size": `${0.63 * scale}rem`,
-    "--node-order-size": `${19 * scale}px`,
-    "--node-order-font-size": `${0.64 * scale}rem`,
-    "--node-action-size": `${26 * scale}px`,
-    "--node-action-font-size": `${1 * scale}rem`,
-  } as CSSProperties;
-
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const fitToViewport = () => {
-      const naturalWidth = widestColumn * (214 + 48) + 36;
-      const nextScale = Math.max(0.72, Math.min(1, viewport.clientWidth / naturalWidth));
-      setScale((current) => (Math.abs(current - nextScale) < 0.01 ? current : nextScale));
-    };
-    fitToViewport();
-    const observer = new ResizeObserver(fitToViewport);
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, [widestColumn]);
-
+  const [summaryDraft, setSummaryDraft] = useState("");
+  const [editingId, setEditingId] = useState<BlockId>();
+  const [heights, setHeights] = useState<Record<BlockId, number>>({});
   useLayoutEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const measureConnections = () => {
-      const canvasBounds = canvas.getBoundingClientRect();
-      setCanvasSize({ width: canvasBounds.width || 1, height: canvasBounds.height || 1 });
-      setConnectionPaths(connections.flatMap(({ from, to }) => {
-        const fromElement = nodeElementsRef.current.get(from);
-        const toElement = nodeElementsRef.current.get(to);
-        if (!fromElement || !toElement) return [];
-        const fromBounds = fromElement.getBoundingClientRect();
-        const toBounds = toElement.getBoundingClientRect();
-        const startX = fromBounds.right - canvasBounds.left;
-        const startY = fromBounds.top + fromBounds.height / 2 - canvasBounds.top;
-        const endX = toBounds.left - canvasBounds.left;
-        const endY = toBounds.top + toBounds.height / 2 - canvasBounds.top;
-        const curve = Math.max(36, Math.abs(endX - startX) * 0.45);
-        return [{ from, to, d: `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}` }];
-      }));
+    const measure = () => {
+      const next = Object.fromEntries([...nodeElementsRef.current].map(([id, element]) => [id, element.getBoundingClientRect().height || NODE_HEIGHT]));
+      setHeights(current => Object.keys(next).length === Object.keys(current).length && Object.entries(next).every(([id, height]) => current[id] === height) ? current : next);
     };
-    measureConnections();
-    const observer = new ResizeObserver(measureConnections);
-    observer.observe(canvas);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    nodeElementsRef.current.forEach(element => observer.observe(element));
     return () => observer.disconnect();
-  }, [connections, nodePositions, scale]);
+  }, [flow.blockIds]);
+  const selectedBlockIdSet = useMemo(() => new Set(selectedBlockIds), [selectedBlockIds]);
+  const linking = connection.kind !== "idle";
+  const worldPosition = (x: number, y: number) => {
+    const bounds = canvasRef.current!.getBoundingClientRect();
+    return { x: x - bounds.left + originRef.current.x, y: y - bounds.top + originRef.current.y };
+  };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenu(undefined);
+      if (!event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.key.toLowerCase() !== "t") return;
+      if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable='true']")) return;
+      const pointer = mouseRef.current;
+      if (!pointer) return;
+      event.preventDefault();
+      if (event.repeat || event.isComposing || linking || panDragRef.current || pointerDragRef.current || selectionDragRef.current) return;
+      setMenu(undefined);
+      onCreateBlock?.(worldPosition(pointer.x, pointer.y));
+    };
+    const dismiss = (event: Event) => {
+      if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
+      setMenu(undefined);
+    };
+    const blur = () => { setMenu(undefined); mouseRef.current = undefined; panDragRef.current = undefined; viewportRef.current?.classList.remove("is-panning"); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", dismiss, true);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", dismiss, true);
+      window.removeEventListener("blur", blur);
+    };
+  }, [onCreateBlock, linking]);
+  useEffect(() => { setMenu(undefined); setEditingId(undefined); }, [flow.id, linking]);
+  useEffect(() => { if (menu?.linkId && !flow.links.has(menu.linkId)) setMenu(undefined); }, [flow.links, menu]);
+  useEffect(() => { if (menu) menuRef.current?.querySelector("button")?.focus(); }, [menu]);
+  const positions = Object.fromEntries(flow.blockIds.map((id, index) => [id, nodePositions[id] ?? defaultPosition(index)]));
+  const origin = { x: Math.min(0, ...Object.values(positions).map((p) => p.x - 36)), y: Math.min(0, ...Object.values(positions).map((p) => p.y - 36)) };
+  const screenPosition = (id: string) => ({ x: positions[id].x - origin.x, y: positions[id].y - origin.y });
+  const width = Math.max(1200, ...Object.values(positions).map((p) => p.x - origin.x + NODE_WIDTH + 300));
+  const height = Math.max(800, ...Object.entries(positions).map(([id, p]) => p.y - origin.y + (heights[id] ?? NODE_HEIGHT) + 300));
+  const pathBetween = (a: string, b: string) => linkPath(screenPosition(a), screenPosition(b), heights[a], heights[b]);
+  const originRef = useRef(origin);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (viewport) { viewport.scrollLeft += originRef.current.x - origin.x; viewport.scrollTop += originRef.current.y - origin.y; }
+    originRef.current = origin;
+  }, [origin.x, origin.y]);
 
   const finishPanning = (viewport: HTMLDivElement, pointerId: number) => {
     if (!panDragRef.current) return;
@@ -173,8 +184,8 @@ export function FlowCanvas({
   const updateDraggedBlocks = (drag: PointerDrag) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const x = drag.currentX - drag.startX + viewport.scrollLeft - drag.scrollLeft;
-    const y = drag.currentY - drag.startY + viewport.scrollTop - drag.scrollTop;
+    const x = drag.currentX - drag.startX + viewport.scrollLeft - drag.scrollLeft + originRef.current.x - drag.origin.x;
+    const y = drag.currentY - drag.startY + viewport.scrollTop - drag.scrollTop + originRef.current.y - drag.origin.y;
     if (Math.abs(x) > 3 || Math.abs(y) > 3) drag.moved = true;
     onNodePositionsChange(Object.fromEntries(drag.blockIds.map((id) => [id, { x: drag.positions[id].x + x, y: drag.positions[id].y + y }])));
   };
@@ -272,128 +283,144 @@ export function FlowCanvas({
       }
     : undefined;
 
+  const activate = (id: BlockId) => {
+    if (linking) onChooseConnectionBlock(id);
+    else { onSelectedBlockIdsChange([id]); onOpenBlock(id); }
+  };
   return (
-    <div
-      className="flow-canvas-scroll"
-      ref={viewportRef}
-      onContextMenu={(event) => event.preventDefault()}
-      onPointerDown={(event) => {
-        if (event.button !== 2) return;
-        event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        panDragRef.current = { startX: event.clientX, startY: event.clientY, scrollLeft: event.currentTarget.scrollLeft, scrollTop: event.currentTarget.scrollTop };
-        event.currentTarget.classList.add("is-panning");
+    <div className="flow-canvas-scroll" ref={viewportRef} onContextMenu={(e) => e.preventDefault()}
+      onPointerEnter={(e) => { mouseRef.current = { x: e.clientX, y: e.clientY }; }}
+      onPointerLeave={() => { mouseRef.current = undefined; }}
+      onScroll={() => setMenu(undefined)}
+      onPointerDown={(e) => {
+        if (e.target instanceof Element && e.target.closest(".canvas-context-menu")) return;
+        if (e.button !== 2) return;
+        e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId);
+        const target = e.target instanceof Element ? e.target : undefined;
+        const blockId = target?.closest<HTMLElement>("[data-block-id]")?.dataset.blockId;
+        const linkId = target?.closest("[data-link-id]")?.getAttribute("data-link-id") ?? undefined;
+        panDragRef.current = { startX: e.clientX, startY: e.clientY, scrollLeft: e.currentTarget.scrollLeft, scrollTop: e.currentTarget.scrollTop, moved: false, blockId, linkId };
       }}
-      onPointerMove={(event) => {
+      onPointerMove={(e) => {
+        mouseRef.current = { x: e.clientX, y: e.clientY };
         const drag = panDragRef.current;
         if (!drag) return;
-        const next = getPannedScroll(drag, event.clientX, event.clientY);
-        event.currentTarget.scrollLeft = next.left;
-        event.currentTarget.scrollTop = next.top;
+        if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 5) drag.moved = true;
+        if (drag.moved) {
+          e.currentTarget.classList.add("is-panning");
+          const next = getPannedScroll(drag, e.clientX, e.clientY);
+          e.currentTarget.scrollLeft = next.left; e.currentTarget.scrollTop = next.top;
+        }
       }}
-      onPointerUp={(event) => finishPanning(event.currentTarget, event.pointerId)}
-      onPointerCancel={(event) => finishPanning(event.currentTarget, event.pointerId)}
-    >
-      <div
-        className="flow-canvas"
-        ref={canvasRef}
-        style={canvasStyle}
-        onPointerDown={(event) => {
-          if (event.button !== 0 || (event.target instanceof Element && event.target.closest(".node-wrap"))) return;
-          event.preventDefault();
-          const canvasBounds = event.currentTarget.getBoundingClientRect();
-          const drag = { startX: event.clientX - canvasBounds.left, startY: event.clientY - canvasBounds.top, currentX: event.clientX - canvasBounds.left, currentY: event.clientY - canvasBounds.top };
-          event.currentTarget.setPointerCapture(event.pointerId);
-          setAutoScrollLimit();
-          selectionDragRef.current = drag;
-          setSelectionDrag(drag);
+      onPointerUp={(e) => {
+        const drag = panDragRef.current;
+        if (e.button !== 2 || !drag) return;
+        if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) <= 5 && !linking) {
+          if (drag.blockId) onSelectedBlockIdsChange([drag.blockId]);
+          if (drag.linkId) onSelectLink(drag.linkId);
+          setMenu({ x: Math.max(0, Math.min(e.clientX, window.innerWidth - 190)), y: Math.max(0, Math.min(e.clientY, window.innerHeight - (drag.blockId ? 94 : 54))), position: worldPosition(drag.startX, drag.startY), blockId: drag.blockId, linkId: drag.linkId });
+        }
+        finishPanning(e.currentTarget, e.pointerId);
+      }} onPointerCancel={(e) => finishPanning(e.currentTarget, e.pointerId)}
+      onLostPointerCapture={(e) => finishPanning(e.currentTarget, e.pointerId)}>
+      {menu && <div ref={menuRef} className="canvas-context-menu" role="menu" aria-label={menu.linkId ? "연결 작업" : menu.blockId ? "블록 작업" : "노드 생성"} style={{ left: menu.x, top: menu.y }}
+        onPointerDown={(e) => e.stopPropagation()}>
+        {menu.linkId ? <button role="menuitem" onClick={() => { onDeleteLink?.(menu.linkId!); setMenu(undefined); }}>연결 삭제 <span>Delete</span></button> : menu.blockId ? <>
+          <button role="menuitem" onClick={() => { onBeginConnection?.(menu.blockId!); setMenu(undefined); }}>연결모드 진입 <span>Ctrl+D</span></button>
+          <button role="menuitem" onClick={() => { onDeleteBlock?.(menu.blockId!); setMenu(undefined); }}>삭제 <span>Delete</span></button>
+        </> : <button role="menuitem" onClick={() => { onCreateBlock?.(menu.position); setMenu(undefined); }}>새 노드 생성 <span>Ctrl+T</span></button>}
+      </div>}
+      <div className="flow-canvas graph-canvas" ref={canvasRef} style={{ width, height }}
+        onPointerDown={(e) => {
+          if (linking || e.button !== 0 || (e.target instanceof Element && e.target.closest(".node-wrap, .link-hit"))) return;
+          setEditingId(undefined);
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+          onSelectedBlockIdsChange([]);
+          e.preventDefault(); const bounds = e.currentTarget.getBoundingClientRect();
+          const drag = { startX: e.clientX - bounds.left, startY: e.clientY - bounds.top, currentX: e.clientX - bounds.left, currentY: e.clientY - bounds.top };
+          e.currentTarget.setPointerCapture(e.pointerId); setAutoScrollLimit(); selectionDragRef.current = drag; setSelectionDrag(drag);
         }}
-        onPointerMove={(event) => {
-          const drag = selectionDragRef.current;
-          if (!drag) return;
-          updateSelectionDrag(event.clientX, event.clientY);
-          startAutoScroll(event.clientX, event.clientY);
-        }}
-        onPointerUp={(event) => finishSelecting(event.currentTarget, event.pointerId)}
-        onPointerCancel={(event) => finishSelecting(event.currentTarget, event.pointerId, false)}
-      >
-        <div className="canvas-direction" aria-hidden="true">흐름은 오른쪽으로 이어집니다 →</div>
-        <svg className="connection-layer" viewBox={`0 0 ${canvasSize.width} ${canvasSize.height}`} preserveAspectRatio="none" aria-hidden="true">
-          {connectionPaths.map((path) => <path d={path.d} key={`${path.from}-${path.to}`} />)}
+        onPointerMove={(e) => { if (selectionDragRef.current) { updateSelectionDrag(e.clientX, e.clientY); startAutoScroll(e.clientX, e.clientY); } }}
+        onPointerUp={(e) => finishSelecting(e.currentTarget, e.pointerId)} onPointerCancel={(e) => finishSelecting(e.currentTarget, e.pointerId, false)}>
+        <svg className="connection-layer" width={width} height={height}>
+          {[...flow.links.values()].map((link) => {
+            const d = pathBetween(link.source, link.target);
+            return <g key={link.id}>
+              <path d={d} className={selectedLinkId === link.id ? "is-selected" : ""} />
+              {!linking && <path d={d} className="link-hit" data-link-id={link.id} role="button" tabIndex={0} aria-label={"연결 선택: " + getDisplayTitle(workspace.blocks.get(link.source)!) + " — " + getDisplayTitle(workspace.blocks.get(link.target)!)}
+                onClick={(e) => { e.stopPropagation(); onSelectLink(link.id); }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onSelectLink(link.id); } }} />}
+            </g>;
+          })}
+          {connection.kind === "ready" && positions[connection.first] && positions[connection.second] &&
+            <path className="link-preview" d={pathBetween(connection.first, connection.second)} />}
         </svg>
         {selectionStyle && <div className="selection-marquee" style={selectionStyle} aria-hidden="true" />}
-        {lanes.map(({ branch, startColumn }) => {
-          const isRoot = branch.id === flow.rootBranchId;
-          const laneStyle = { "--lane-start": startColumn } as CSSProperties;
-          return (
-            <section className={`flow-lane ${isRoot ? "is-root" : ""}`} style={laneStyle} key={branch.id}>
-              {isRoot && <header className="lane-header"><span className="lane-label">주 흐름</span></header>}
-              <div className="lane-nodes">
-                {branch.itemIds.map((blockId, index) => {
-                  const block = workspace.blocks.get(blockId);
-                  if (!block) return null;
-                  const nodePosition = nodePositions[blockId] ?? { x: 0, y: 0 };
-                  const nodeWrapStyle = { "--node-offset-x": `${nodePosition.x}px`, "--node-offset-y": `${nodePosition.y}px` } as CSSProperties;
-                  return (
-                    <div className="node-wrap" style={nodeWrapStyle} key={blockId}>
-                      <article
-                        ref={(element) => { if (element) nodeElementsRef.current.set(blockId, element); else nodeElementsRef.current.delete(blockId); }}
-                        className={`flow-node ${selectedBlockIdSet.has(blockId) ? "is-selected" : ""}`}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => { if (!suppressClickRef.current) { onSelectedBlockIdsChange([blockId]); onOpenBlock(blockId); } }}
-                        onPointerDown={(event) => {
-                          if (event.target instanceof HTMLInputElement || event.button !== 0) return;
-                          event.currentTarget.setPointerCapture(event.pointerId);
-                          const blockIds = selectedBlockIdSet.has(blockId) ? selectedBlockIds : [blockId];
-                          if (!selectedBlockIdSet.has(blockId)) onSelectedBlockIdsChange(blockIds);
-                          setAutoScrollLimit();
-                          pointerDragRef.current = {
-                            blockIds,
-                            startX: event.clientX,
-                            startY: event.clientY,
-                            currentX: event.clientX,
-                            currentY: event.clientY,
-                            scrollLeft: viewportRef.current?.scrollLeft ?? 0,
-                            scrollTop: viewportRef.current?.scrollTop ?? 0,
-                            positions: Object.fromEntries(blockIds.map((id) => [id, nodePositions[id] ?? { x: 0, y: 0 }])),
-                            moved: false,
-                          };
-                        }}
-                        onPointerMove={(event) => {
-                          const drag = pointerDragRef.current;
-                          if (!drag || !drag.blockIds.includes(blockId)) return;
-                          drag.currentX = event.clientX;
-                          drag.currentY = event.clientY;
-                          updateDraggedBlocks(drag);
-                          startAutoScroll(event.clientX, event.clientY);
-                        }}
-                        onPointerUp={(event) => {
-                          const drag = pointerDragRef.current;
-                          if (drag?.blockIds.includes(blockId) && drag.moved) { suppressClickRef.current = true; window.setTimeout(() => { suppressClickRef.current = false; }, 0); }
-                          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-                          pointerDragRef.current = undefined;
-                          stopAutoScroll();
-                        }}
-                        onPointerCancel={() => { pointerDragRef.current = undefined; stopAutoScroll(); }}
-                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenBlock(blockId); } }}
-                        aria-label={`${getDisplayTitle(block)} 편집`}
-                      >
-                        <input className="node-title-input" value={block.title ?? ""} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()} onChange={(event) => onRenameBlock(blockId, event.currentTarget.value)} placeholder={getDisplayTitle(block)} aria-label="노드 제목 바로 편집" />
-                      </article>
-                      <div className="node-quick-actions">
-                        {index === branch.itemIds.length - 1 && <button className="node-action" type="button" onClick={() => onAddAfter(blockId)} aria-label="다음 노드 추가" title="다음 노드 추가">+</button>}
-                        <button className="node-action" type="button" onClick={() => onCreateBranch(blockId)} aria-label="갈래 만들기" title="갈래 만들기">⑂</button>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div className="node-wrap" >
-                {branch.itemIds.length === 0 && <button className="empty-lane-add" type="button" onClick={() => onAddAfter()}>첫 노드 만들기</button>}
+        {!flow.blockIds.length && <p className="canvas-empty">블록 추가 버튼으로 첫 메모를 만드세요.</p>}
+        {flow.blockIds.map((blockId) => {
+          const block = workspace.blocks.get(blockId)!;
+          const point = screenPosition(blockId);
+          const first = connection.kind !== "idle" && connection.kind !== "first" && connection.first === blockId;
+          const second = connection.kind === "ready" && connection.second === blockId;
+          return <div className="node-wrap graph-node-wrap" data-block-id={blockId} style={{ left: point.x, top: point.y }} key={blockId}>
+            <article ref={(element) => { if (element) nodeElementsRef.current.set(blockId, element); else nodeElementsRef.current.delete(blockId); }}
+              className={"flow-node" + (editingId === blockId ? " is-editing" : "") + (selectedBlockIdSet.has(blockId) ? " is-selected" : "") + (first ? " connection-first" : "") + (second ? " connection-second" : "")}
+              role="button" tabIndex={0} aria-label={getDisplayTitle(block) + (linking ? " 연결 대상으로 선택" : " 편집")}
+              onClick={(e) => { if (editingId !== blockId && !suppressClickRef.current) { e.currentTarget.focus(); activate(blockId); } }}
+              onDoubleClick={() => { if (!linking) { activate(blockId); setSummaryDraft(block.title ?? ""); setEditingId(blockId); } }}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (!linking && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+                  e.preventDefault();
+                  const next = findDirectionalNeighbor(blockId, e.key as "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight", positions, flow.blockIds, heights);
+                  if (next) {
+                    const element = nodeElementsRef.current.get(next);
+                    onSelectedBlockIdsChange([next]);
+                    element?.focus();
+                    element?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+                    onOpenBlock(next);
+                  }
+                  return;
+                }
+                if (e.repeat) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  if (connection.kind === "ready" && e.key === "Enter") return;
+                  e.preventDefault(); e.stopPropagation(); activate(blockId);
+                  if (!linking && e.key === "Enter") { setSummaryDraft(block.title ?? ""); setEditingId(blockId); }
+                }
+              }}
+              onPointerDown={(e) => {
+                if (linking || e.button !== 0 || editingId === blockId) return;
+                e.currentTarget.setPointerCapture(e.pointerId);
+                const blockIds = selectedBlockIdSet.has(blockId) ? selectedBlockIds : [blockId];
+                if (!selectedBlockIdSet.has(blockId)) onSelectedBlockIdsChange(blockIds);
+                setAutoScrollLimit();
+                pointerDragRef.current = { blockIds, startX: e.clientX, startY: e.clientY, currentX: e.clientX, currentY: e.clientY,
+                  scrollLeft: viewportRef.current?.scrollLeft ?? 0, scrollTop: viewportRef.current?.scrollTop ?? 0,
+                  positions: Object.fromEntries(blockIds.map((id) => [id, positions[id]])), origin, moved: false };
+              }}
+              onPointerMove={(e) => { const drag = pointerDragRef.current; if (!drag || !drag.blockIds.includes(blockId)) return; drag.currentX = e.clientX; drag.currentY = e.clientY; updateDraggedBlocks(drag); startAutoScroll(e.clientX, e.clientY); }}
+              onPointerUp={(e) => { const drag = pointerDragRef.current; if (drag?.moved) { suppressClickRef.current = true; window.setTimeout(() => { suppressClickRef.current = false; }, 0); } if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); pointerDragRef.current = undefined; stopAutoScroll(); }}
+              onPointerCancel={() => { pointerDragRef.current = undefined; stopAutoScroll(); }}>
+              <div className="node-summary">
+                <div className={"node-summary-text" + (!block.title ? " is-placeholder" : "")} aria-hidden={editingId === blockId}>
+                  {(editingId === blockId ? summaryDraft : block.title) || "이 블록의 핵심 생각을 적어보세요"}{"\n"}
                 </div>
+                {editingId === blockId && <textarea autoFocus className="node-summary-input" defaultValue={block.title ?? ""}
+                  aria-label="블록 요약 편집" placeholder="이 블록의 핵심 생각을 적어보세요"
+                  onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}
+                  onChange={e => { setSummaryDraft(e.currentTarget.value); onRenameBlock(blockId, e.currentTarget.value); }}
+                  onBlur={() => setEditingId(undefined)}
+                  onKeyDown={e => {
+                    e.stopPropagation();
+                    if (e.key === "Escape" && !e.nativeEvent.isComposing) {
+                      e.preventDefault(); setEditingId(undefined); nodeElementsRef.current.get(blockId)?.focus();
+                    }
+                  }} />}
               </div>
-            </section>
-          );
+              {(first || second) && <span className="connection-order">{first ? "첫 번째" : "두 번째"}</span>}
+            </article>
+          </div>;
         })}
       </div>
     </div>
