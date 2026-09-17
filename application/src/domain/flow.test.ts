@@ -1,143 +1,54 @@
-import { describe, expect, it } from "vitest";
-import {
-  createBlockAfter,
-  createBranchWithBlock,
-  createFlow,
-  createWorkspace,
-  deleteBlock,
-  deleteFlow,
-  deleteBlockSubtree,
-  getDisplayTitle,
-  moveBlock,
-  moveBranch,
-  updateBlock,
-  validateWorkspace,
-} from "./flow";
-
-describe("Flow domain commands", () => {
-  it("creates, moves, branches, and removes a Block subtree without breaking the tree", () => {
-    let workspace = createWorkspace();
-    const createdFlow = createFlow(workspace, "구조 검증");
-    workspace = createdFlow.workspace;
-    const { flowId } = createdFlow;
-
-    const first = createBlockAfter(workspace, flowId);
-    workspace = first.workspace;
-    const second = createBlockAfter(workspace, flowId, first.blockId);
-    workspace = second.workspace;
-    const third = createBlockAfter(workspace, flowId, second.blockId);
-    workspace = third.workspace;
-
-    const firstBranch = createBranchWithBlock(workspace, flowId, second.blockId);
-    workspace = firstBranch.workspace;
-    const branchSecondBlock = createBlockAfter(workspace, flowId, firstBranch.blockId);
-    workspace = branchSecondBlock.workspace;
-    const nestedBranch = createBranchWithBlock(workspace, flowId, firstBranch.blockId);
-    workspace = nestedBranch.workspace;
-    const siblingBranch = createBranchWithBlock(workspace, flowId, second.blockId);
-    workspace = siblingBranch.workspace;
-
-    workspace = moveBlock(workspace, flowId, third.blockId, workspace.flows.get(flowId)!.rootBranchId, 1).workspace;
-    workspace = moveBranch(workspace, flowId, firstBranch.branchId, third.blockId).workspace;
-
-    expect(validateWorkspace(workspace)).toEqual([]);
-
-    workspace = deleteBlockSubtree(workspace, flowId, firstBranch.blockId).workspace;
-
-    expect(workspace.blocks.has(firstBranch.blockId)).toBe(false);
-    expect(workspace.blocks.has(branchSecondBlock.blockId)).toBe(false);
-    expect(workspace.blocks.has(nestedBranch.blockId)).toBe(false);
-    expect(workspace.blocks.has(siblingBranch.blockId)).toBe(true);
-
-    const secondFlow = createFlow(workspace, "독립 Flow");
-    workspace = secondFlow.workspace;
-    workspace = createBlockAfter(workspace, secondFlow.flowId).workspace;
-
-    expect(validateWorkspace(workspace)).toEqual([]);
+﻿import { describe, expect, it } from "vitest";
+import { createWorkspace, createFlow, createBlock, connectBlocks, disconnectBlocks, deleteBlock, deleteFlow, updateBlock, getDisplayTitle, validateWorkspace } from "./flow";
+const fixture = () => {
+  const f = createFlow(createWorkspace(), "Graph");
+  const a = createBlock(f.workspace, f.flowId);
+  const b = createBlock(a.workspace, f.flowId);
+  const c = createBlock(b.workspace, f.flowId);
+  return { workspace: c.workspace, flowId: f.flowId, a: a.blockId, b: b.blockId, c: c.blockId };
+};
+describe("undirected flow", () => {
+  it("creates independent blocks and allows cycles and isolated blocks", () => {
+    const f = fixture(); let w = f.workspace;
+    expect(w.flows.get(f.flowId)!.links.size).toBe(0);
+    for (const [a,b] of [[f.a,f.b],[f.b,f.c],[f.c,f.a]]) w = connectBlocks(w,f.flowId,a,b).workspace;
+    w = createBlock(w,f.flowId).workspace;
+    expect(validateWorkspace(w)).toEqual([]);
+    expect(f.workspace.flows.get(f.flowId)!.links.size).toBe(0);
   });
-
-  it("rejects moving a Block into one of its own child branches", () => {
-    let workspace = createWorkspace();
-    const createdFlow = createFlow(workspace, "순환 방지");
-    workspace = createdFlow.workspace;
-
-    const parent = createBlockAfter(workspace, createdFlow.flowId);
-    workspace = parent.workspace;
-    const childBranch = createBranchWithBlock(workspace, createdFlow.flowId, parent.blockId);
-    workspace = childBranch.workspace;
-
-    expect(() =>
-      moveBlock(workspace, createdFlow.flowId, parent.blockId, childBranch.branchId, 0),
-    ).toThrow("하위 Branch");
+  it("rejects reverse duplicates, self links and foreign endpoints", () => {
+    const f = fixture(); const w = connectBlocks(f.workspace,f.flowId,f.a,f.b).workspace;
+    expect(() => connectBlocks(w,f.flowId,f.b,f.a)).toThrow("이미");
+    expect(() => connectBlocks(w,f.flowId,f.a,f.a)).toThrow("같은");
+    expect(() => connectBlocks(w,f.flowId,f.a,"missing")).toThrow("없는");
+    const other = createFlow(w); const block = createBlock(other.workspace,other.flowId);
+    expect(() => connectBlocks(block.workspace,f.flowId,f.a,block.blockId)).toThrow();
   });
-
-  it("deletes only the selected Block and its child branches", () => {
-    let workspace = createWorkspace();
-    const createdFlow = createFlow(workspace, "삭제");
-    workspace = createdFlow.workspace;
-    const first = createBlockAfter(workspace, createdFlow.flowId);
-    workspace = first.workspace;
-    const second = createBlockAfter(workspace, createdFlow.flowId, first.blockId);
-    workspace = second.workspace;
-    const childBranch = createBranchWithBlock(workspace, createdFlow.flowId, first.blockId);
-    workspace = childBranch.workspace;
-
-    workspace = deleteBlock(workspace, createdFlow.flowId, first.blockId).workspace;
-
-    expect(workspace.blocks.has(first.blockId)).toBe(false);
-    expect(workspace.blocks.has(childBranch.blockId)).toBe(false);
-    expect(workspace.blocks.has(second.blockId)).toBe(true);
-    expect(validateWorkspace(workspace)).toEqual([]);
+  it("deletes only the block and its incident links, preserving neighbors", () => {
+    const f = fixture(); let w = connectBlocks(f.workspace,f.flowId,f.a,f.b).workspace;
+    w = connectBlocks(w,f.flowId,f.b,f.c).workspace;
+    w = deleteBlock(w,f.flowId,f.a).workspace;
+    expect([...w.blocks.keys()]).toEqual([f.b,f.c]);
+    expect([...w.flows.get(f.flowId)!.links.values()].map(l=>[l.source,l.target])).toEqual([[f.b,f.c]]);
+    const link = [...w.flows.get(f.flowId)!.links.keys()][0];
+    w = disconnectBlocks(w,f.flowId,link).workspace;
+    expect(w.blocks.size).toBe(2); expect(validateWorkspace(w)).toEqual([]);
   });
-
-  it("deletes a Flow, its Blocks, and activates the remaining Flow", () => {
-    let workspace = createWorkspace();
-    const firstFlow = createFlow(workspace, "첫 Flow");
-    workspace = createBlockAfter(firstFlow.workspace, firstFlow.flowId).workspace;
-    const secondFlow = createFlow(workspace, "둘 Flow");
-    workspace = secondFlow.workspace;
-    const secondBlock = createBlockAfter(workspace, secondFlow.flowId);
-    workspace = secondBlock.workspace;
-
-    workspace = deleteFlow(workspace, secondFlow.flowId).workspace;
-
-    expect(workspace.flows.has(secondFlow.flowId)).toBe(false);
-    expect(workspace.blocks.has(secondBlock.blockId)).toBe(false);
-    expect(workspace.activeFlowId).toBe(firstFlow.flowId);
-    expect(validateWorkspace(workspace)).toEqual([]);
+  it("deletes a flow and retains the other flow", () => {
+    const f=fixture(); const other=createFlow(f.workspace);
+    const w=deleteFlow(other.workspace,f.flowId).workspace;
+    expect(w.blocks.size).toBe(0); expect(w.activeFlowId).toBe(other.flowId); expect(validateWorkspace(w)).toEqual([]);
   });
-
-  it("keeps an explicit title separate from Markdown and derives a title when absent", () => {
-    let workspace = createWorkspace();
-    const createdFlow = createFlow(workspace, "제목 정책");
-    workspace = createdFlow.workspace;
-    const createdBlock = createBlockAfter(workspace, createdFlow.flowId);
-    workspace = createdBlock.workspace;
-
-    workspace = updateBlock(workspace, createdBlock.blockId, {
-      title: "명시적 제목",
-      markdown: "본문의 첫 줄\n두 번째 줄",
-    }).workspace;
-    expect(getDisplayTitle(workspace.blocks.get(createdBlock.blockId)!)).toBe("명시적 제목");
-
-    workspace = updateBlock(workspace, createdBlock.blockId, {
-      title: "",
-      markdown: "# Markdown 제목\n본문",
-    }).workspace;
-    expect(getDisplayTitle(workspace.blocks.get(createdBlock.blockId)!)).toBe("Markdown 제목");
+  it("preserves Markdown and explicit titles", () => {
+    const f=fixture(); const w=updateBlock(f.workspace,f.a,{title:"Title",markdown:"# Body"}).workspace;
+    expect(getDisplayTitle(w.blocks.get(f.a)!)).toBe("Title");
+    expect(getDisplayTitle({...w.blocks.get(f.a)!,title:undefined})).toBe("Body");
+    expect(f.workspace.blocks.get(f.a)!.markdown).toBe("");
   });
-
-  it("rejects moving a Branch under a Block within its own subtree", () => {
-    let workspace = createWorkspace();
-    const createdFlow = createFlow(workspace, "Branch 순환 방지");
-    workspace = createdFlow.workspace;
-    const parent = createBlockAfter(workspace, createdFlow.flowId);
-    workspace = parent.workspace;
-    const branch = createBranchWithBlock(workspace, createdFlow.flowId, parent.blockId);
-    workspace = branch.workspace;
-
-    expect(() => moveBranch(workspace, createdFlow.flowId, branch.branchId, branch.blockId)).toThrow(
-      "하위 Branch",
-    );
+  it("validates invalid membership and duplicate undirected links", () => {
+    const f=fixture(); const flow=f.workspace.flows.get(f.flowId)!;
+    flow.blockIds.push(f.a);
+    flow.links.set("1",{id:"1",source:f.a,target:f.b});flow.links.set("2",{id:"2",source:f.b,target:f.a});
+    expect(validateWorkspace(f.workspace).length).toBe(2);
   });
 });

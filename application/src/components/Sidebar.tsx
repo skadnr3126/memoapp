@@ -14,7 +14,7 @@ type SidebarProps = {
 };
 
 const getNodeCount = (flow: Flow) =>
-  [...flow.branches.values()].reduce((count, branch) => count + branch.itemIds.length, 0);
+  flow.blockIds.length;
 
 export function Sidebar({ flows, activeFlowId, validationErrors, workspaceRoot, onCreateFlow, onSelectFlow, onDeleteFlow, onReturnToWorkspaceSelection ,onChooseWorkspace}: SidebarProps) {
   const [newFlowTitle, setNewFlowTitle] = useState("");
@@ -59,7 +59,7 @@ export function Sidebar({ flows, activeFlowId, validationErrors, workspaceRoot, 
           </section>
         )}
       <div className={`validation-panel ${validationErrors.length ? "has-errors" : ""}`}>
-        <p className="section-label">TREE CHECK</p>
+        <p className="section-label">FLOW CHECK</p>
         {validationErrors.length === 0 ? <p>✓ 구조가 올바릅니다</p> : <ul>{validationErrors.map((error) => <li key={error}>{error}</li>)}</ul>}
       </div>
       </div>

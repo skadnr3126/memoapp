@@ -196,3 +196,29 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   .node-editor-footer { align-items: stretch; flex-direction: column-reverse; }
   .node-editor-footer > div { display: grid; grid-template-columns: 1fr 1fr; }
 }
+.graph-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 auto 12px; max-width: 1400px; font-size: .8rem; }
+.graph-canvas { display: block; padding: 0; min-width: 100%; --node-width: 320px; --node-height: 144px; }
+.graph-node-wrap { position: absolute; width: 320px; transform: none; z-index: 2; }
+.graph-node-wrap .flow-node { min-height: 144px; transform: none; position: relative; display: block; padding: 22px; border-radius: 12px; text-align: left; user-select: none; }
+.connection-layer .link-hit { stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
+.connection-layer .link-hit:focus { outline: none; stroke: rgba(60, 120, 160, .25); }
+.connection-layer path.is-selected { stroke: #336db0; stroke-width: 4; }
+.connection-layer .link-preview { stroke: #bd7b2d; stroke-width: 3; stroke-dasharray: 8 6; }
+.flow-node.connection-first { border: 3px solid #347a4a; }
+.flow-node.connection-second { border: 3px solid #bd7b2d; }
+.connection-order { position: absolute; bottom: 7px; font-size: .65rem; color: #617267; }
+.canvas-empty { padding: 36px; color: #617267; font-size: .85rem; }
+.canvas-context-menu { position: fixed; z-index: 20; width: 190px; padding: 5px; border: 1px solid #cad9cc; border-radius: 8px; background: #fffefb; box-shadow: 0 8px 24px rgba(16,30,21,.18); }
+.canvas-context-menu button { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 10px 8px; border: 0; border-radius: 4px; color: #25312a; background: transparent; font-size: .8rem; }
+.canvas-context-menu button:hover, .canvas-context-menu button:focus-visible { background: #e8f2e7; outline: none; }
+.canvas-context-menu span { color: #617267; font-size: .7rem; }
+
+.node-summary { position: relative; width: 100%; }
+.node-summary-text, .node-summary-input { margin: 0; padding: 0; width: 100%; border: 0; font: inherit; font-size: 15px; font-weight: 400; line-height: 1.7; letter-spacing: normal; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; }
+.node-summary-text { min-height: 98px; }
+.node-summary-text.is-placeholder { color: #87948b; }
+.node-summary-input { position: absolute; inset: 0; height: 100%; resize: none; overflow: hidden; background: transparent; color: #27332a; outline: none; box-shadow: none; cursor: text; user-select: text; }
+.node-summary-input::placeholder { color: #87948b; }
+.is-editing .node-summary-text { visibility: hidden; }
+.graph-node-wrap .flow-node.is-editing { border-color: #398352; box-shadow: 0 0 0 3px rgba(57,131,82,.2); cursor: text; }
+.flow-node.connection-first, .flow-node.connection-second { border-width: 1px; }
