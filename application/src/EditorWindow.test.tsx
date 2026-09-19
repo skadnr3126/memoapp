@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { EditorWindow } from "./EditorWindow";
-import { EDITOR_LOAD, EDITOR_SAVE, EDITOR_SAVED } from "./editorProtocol";
+import { EDITOR_LOAD, EDITOR_SAVE, EDITOR_SAVED, EDITOR_FLUSH, EDITOR_FLUSHED } from "./editorProtocol";
 import type { Editor } from "@tiptap/core";
 
 const mocks = vi.hoisted(() => ({ handlers: new Map<string, (event: { payload: any }) => void>(), emit: vi.fn().mockResolvedValue(undefined) }));
@@ -27,12 +27,31 @@ const edit = (value: string) => {
   });
 };
 const saves = () => mocks.emit.mock.calls.filter(call => call[1] === EDITOR_SAVE);
+const flushed = () => mocks.emit.mock.calls.filter(call => call[1] === EDITOR_FLUSHED);
 beforeEach(async () => {
   vi.useFakeTimers(); mocks.handlers.clear(); mocks.emit.mockClear();
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<EditorWindow />)); load("a");
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); });
+it("confirms summary flush only after the newest pending draft is acknowledged", async () => {
+  edit("first");
+  await act(async () => vi.advanceTimersByTime(1000));
+  edit("last draft");
+  act(() => mocks.handlers.get(EDITOR_FLUSH)!({ payload: { requestId: "summary" } }));
+  expect(flushed()).toHaveLength(0);
+  act(() => mocks.handlers.get(EDITOR_SAVED)!({ payload: { request: saves()[0][2] } }));
+  expect(saves()[1][2].markdown).toBe("last draft");
+  expect(flushed()).toHaveLength(0);
+  act(() => mocks.handlers.get(EDITOR_SAVED)!({ payload: { request: saves()[1][2] } }));
+  expect(flushed()[0][2]).toEqual({ requestId: "summary" });
+});
+it("reports a rejected editor save to the summary caller", () => {
+  edit("unsaved");
+  act(() => mocks.handlers.get(EDITOR_FLUSH)!({ payload: { requestId: "summary" } }));
+  act(() => mocks.handlers.get(EDITOR_SAVED)!({ payload: { request: saves()[0][2], error: "failed" } }));
+  expect(flushed()[0][2]).toEqual({ requestId: "summary", error: "failed" });
+});
 it("saves changed content periodically and keeps typing made while a save is pending", async () => {
   expect(host.querySelector("input")).toBeNull();
   edit("first"); await act(async () => vi.advanceTimersByTime(1000));

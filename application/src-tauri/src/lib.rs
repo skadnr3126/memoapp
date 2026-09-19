@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+mod summary;
 use std::{
     collections::HashSet,
     fs,
@@ -302,7 +303,8 @@ pub fn run() {
             save_workspace_snapshot,
             migrate_workspace,
             load_ui_preferences,
-            save_ui_preferences
+            save_ui_preferences,
+            summary::summarize_flow
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -350,6 +352,7 @@ mod tests {
         let memo = ensure_memo(&temp.0).unwrap();
         let snap = snapshot();
         write_atomic(&memo.join("flows/old.json"), "old").unwrap();
+        write_atomic(&memo.join("ai/summaries/flow_test.md"), "summary").unwrap();
         write_atomic(&memo.join("blocks/.A.md.tmp"), "interrupted write").unwrap();
         let op = Operation {
             version: 2,
@@ -369,6 +372,7 @@ mod tests {
             "original markdown"
         );
         assert!(!memo.join("flows/old.json").exists());
+        assert_eq!(fs::read_to_string(memo.join("ai/summaries/flow_test.md")).unwrap(), "summary");
         assert_eq!(
             read_files(&memo.join("blocks"), &memo, "md").unwrap().len(),
             1

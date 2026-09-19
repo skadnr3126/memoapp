@@ -33,6 +33,8 @@ import {
 } from "./storage/repository";
 import { clampSidebarWidth } from "./sidebarWidth";
 import "./App.css";
+import { FlowSummary } from "./components/FlowSummary";
+import { flowSummaryInput, flushEditor } from "./flowSummary";
 
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => createWorkspace());
@@ -69,7 +71,7 @@ function App() {
   const saveRevisionRef = useRef(0);
   const savedStateRef = useRef<{ workspace: WorkspaceState; positions: NodePositionsByFlow } | undefined>(undefined);
   const saveCurrent = async () => {
-    const current = latestRef.current;
+    const current = { ...latestRef.current, workspace: workspaceRef.current };
     if (!current.workspaceRoot || !hydratedRef.current || !isDesktopRuntime()) return;
     const revision = ++saveRevisionRef.current;
     setStorageState("saving");
@@ -82,6 +84,7 @@ function App() {
         const isCurrent = latestRef.current.workspace === current.workspace && latestRef.current.nodePositionsByFlow === current.nodePositionsByFlow;
         setStorageState(isCurrent ? "ready" : "pending"); setStorageError(undefined);
       }
+      return current;
     } catch (error) {
       if (latestRef.current.workspaceRoot === current.workspaceRoot) {
         setStorageError(error instanceof Error ? error.message : "저장하지 못했습니다."); setStorageState("error");
@@ -100,6 +103,17 @@ function App() {
 
   const activeFlow = workspace.activeFlowId ? workspace.flows.get(workspace.activeFlowId) : undefined;
   const validationErrors = useMemo(() => validateWorkspace(workspace), [workspace]);
+  const prepareSummary = async () => {
+    const session = workspaceSessionRef.current;
+    const root = latestRef.current.workspaceRoot;
+    const flowId = workspaceRef.current.activeFlowId;
+    if (!root || !flowId || transitioningRef.current) throw new Error("작업공간과 Flow를 먼저 선택하세요.");
+    if (await WebviewWindow.getByLabel("editor")) await flushEditor();
+    if (session !== workspaceSessionRef.current || root !== latestRef.current.workspaceRoot || transitioningRef.current) throw new Error("작업공간이 변경되었습니다. 다시 시도하세요.");
+    const saved = await saveCurrent();
+    if (!saved || session !== workspaceSessionRef.current || root !== latestRef.current.workspaceRoot || transitioningRef.current) throw new Error("작업공간이 변경되었습니다. 다시 시도하세요.");
+    return { workspaceRoot: root, input: flowSummaryInput(saved.workspace, flowId) };
+  };
 
   const sendEditorSession = async (session: EditorSession) => {
     editorSessionRef.current = session;
@@ -541,6 +555,7 @@ function App() {
               </div>
             </header>
             <div className="command-status" role="status">{message}</div>
+            <FlowSummary key={workspaceRoot} prepare={prepareSummary} />
             {storageError && <div className="storage-error" role="alert">{storageError} <button className="storage-retry" type="button" onClick={() => void retrySave()}>다시 시도</button></div>}
             <div className="graph-toolbar">
               <button className="button" onClick={() => addBlock()} disabled={connection.kind !== "idle"}>블록 추가</button>

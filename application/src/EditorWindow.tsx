@@ -4,6 +4,7 @@ import { isDesktopRuntime } from "./storage/repository";
 import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED, type EditorSaveResult, type EditorSaveRequest, type EditorSession } from "./editorProtocol";
 import "./EditorWindow.css";
 import { MarkdownDocument } from "./components/MarkdownDocument";
+import { EDITOR_FLUSH, EDITOR_FLUSHED } from "./editorProtocol";
 
 export function EditorWindow() {
   const [session, setSession] = useState<EditorSession>();
@@ -12,6 +13,14 @@ export function EditorWindow() {
   const currentRef = useRef<EditorSession | undefined>(undefined);
   const draftsRef = useRef(new Map<string, EditorSaveRequest>());
   const pendingRef = useRef(new Set<string>());
+  const flushRequestsRef = useRef(new Set<string>());
+  const confirmFlush = (error?: string) => {
+    if (!error && (draftsRef.current.size || pendingRef.current.size)) return;
+    for (const requestId of flushRequestsRef.current) {
+      void emitTo("main", EDITOR_FLUSHED, { requestId, ...(error ? { error } : {}) });
+    }
+    flushRequestsRef.current.clear();
+  };
 
   const flush = () => {
     for (const [id, request] of draftsRef.current) {
@@ -21,6 +30,7 @@ export function EditorWindow() {
       void emitTo("main", EDITOR_SAVE, request).catch(() => {
         pendingRef.current.delete(id);
         setStatus("저장 전송 실패. 자동으로 다시 시도합니다.");
+        confirmFlush("편집 내용을 메인 창에 전달하지 못했습니다.");
       });
     }
   };
@@ -39,14 +49,23 @@ export function EditorWindow() {
     let unlisten: UnlistenFn | undefined;
     let clearListener: UnlistenFn | undefined;
     let savedListener: UnlistenFn | undefined;
+    let flushListener: UnlistenFn | undefined;
     let disposed = false;
-    void listen(EDITOR_CLEAR, () => { currentRef.current = undefined; draftsRef.current.clear(); pendingRef.current.clear(); setSession(undefined); setMarkdown(""); }).then((stop) => { if (disposed) stop(); else clearListener = stop; });
+    const flushReady = listen<{ requestId: string }>(EDITOR_FLUSH, ({ payload }) => {
+      flushRequestsRef.current.add(payload.requestId);
+      flush(); confirmFlush();
+    }).then(stop => { if (disposed) stop(); else flushListener = stop; });
+    void listen(EDITOR_CLEAR, () => { confirmFlush("편집 세션이 변경되었습니다. 다시 시도하세요."); currentRef.current = undefined; draftsRef.current.clear(); pendingRef.current.clear(); setSession(undefined); setMarkdown(""); }).then((stop) => { if (disposed) stop(); else clearListener = stop; });
     const ready = listen<EditorSaveResult>(EDITOR_SAVED, ({ payload: { request, error } }) => {
       pendingRef.current.delete(request.sessionId);
       const draft = draftsRef.current.get(request.sessionId);
       if (!error && draft?.markdown === request.markdown) draftsRef.current.delete(request.sessionId);
       if (currentRef.current?.sessionId === request.sessionId) {
         setStatus(error ? `저장 실패: ${error}` : draftsRef.current.has(request.sessionId) ? "변경 내용 저장 대기 중…" : "메인 창에 반영됨 · 파일 자동 저장 진행");
+      }
+      if (flushRequestsRef.current.size) {
+        if (error) confirmFlush(error);
+        else { flush(); confirmFlush(); }
       }
     }).then((stop) => { if (disposed) stop(); else savedListener = stop; });
 
@@ -73,7 +92,7 @@ export function EditorWindow() {
         return;
       }
       unlisten = stop;
-      void ready.then(() => { if (!disposed) void emitTo("main", EDITOR_READY); });
+      void Promise.all([ready, flushReady]).then(() => { if (!disposed) void emitTo("main", EDITOR_READY); });
     });
     const timer = window.setInterval(flush, 1000);
     window.addEventListener("blur", flush);
@@ -83,6 +102,7 @@ export function EditorWindow() {
       void unlisten?.();
       clearListener?.();
       savedListener?.();
+      flushListener?.();
       window.clearInterval(timer);
       window.removeEventListener("blur", flush);
     };
