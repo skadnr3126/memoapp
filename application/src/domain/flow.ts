@@ -41,7 +41,7 @@ export const createBlock = (workspace: WorkspaceState, flowId: FlowId): BlockCom
   const blockId = createId("blk");
   const timestamp = new Date().toISOString();
   getFlow(next, flowId).blockIds.push(blockId);
-  next.blocks.set(blockId, { id: blockId, title: "이 블록의 핵심 생각을 적어보세요", markdown: "", createdAt: timestamp, updatedAt: timestamp });
+  next.blocks.set(blockId, { id: blockId, title: "", markdown: "", createdAt: timestamp, updatedAt: timestamp });
   return { workspace: next, blockId };
 };
 export const updateBlock = (workspace: WorkspaceState, blockId: BlockId, changes: Pick<Block, "title" | "markdown">): CommandResult => {

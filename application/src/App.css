@@ -219,7 +219,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .node-summary-text.is-placeholder { color: #87948b; }
 .node-summary-input { position: absolute; inset: 0; height: 100%; resize: none; overflow: hidden; background: transparent; color: #27332a; outline: none; box-shadow: none; cursor: text; user-select: text; }
 .node-summary-input::placeholder { color: #87948b; }
-.graph-node-wrap .flow-node[style*="height"] .node-summary { height: 100%; overflow: auto; }
+.graph-node-wrap .flow-node[style*="height"] .node-summary { height: 100%; overflow: clip; }
 .node-resize { position: absolute; width: 14px; height: 14px; padding: 0; border: 1px solid #398352; border-radius: 3px; background: #fff; opacity: 0; pointer-events: none; touch-action: none; transition: opacity 100ms ease; z-index: 3; }
 .graph-node-wrap:hover .node-resize, .graph-node-wrap:focus-within .node-resize { opacity: 1; pointer-events: auto; }
 .node-resize:focus-visible { outline: 3px solid #398352; outline-offset: 2px; }
