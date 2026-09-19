@@ -33,7 +33,7 @@ export const createFlow = (workspace: WorkspaceState, title = "새 Flow"): Comma
 };
 export const renameFlow = (workspace: WorkspaceState, flowId: FlowId, title: string): CommandResult => {
   const next = cloneWorkspace(workspace);
-  getFlow(next, flowId).title = title.trim() || "제목 없는 Flow";
+  getFlow(next, flowId).title = title;
   return { workspace: next };
 };
 export const createBlock = (workspace: WorkspaceState, flowId: FlowId): BlockCommandResult => {
@@ -41,14 +41,14 @@ export const createBlock = (workspace: WorkspaceState, flowId: FlowId): BlockCom
   const blockId = createId("blk");
   const timestamp = new Date().toISOString();
   getFlow(next, flowId).blockIds.push(blockId);
-  next.blocks.set(blockId, { id: blockId, markdown: "", createdAt: timestamp, updatedAt: timestamp });
+  next.blocks.set(blockId, { id: blockId, title: "이 블록의 핵심 생각을 적어보세요", markdown: "", createdAt: timestamp, updatedAt: timestamp });
   return { workspace: next, blockId };
 };
 export const updateBlock = (workspace: WorkspaceState, blockId: BlockId, changes: Pick<Block, "title" | "markdown">): CommandResult => {
   const next = cloneWorkspace(workspace);
   const block = next.blocks.get(blockId);
   if (!block) throw new Error("Block을 찾을 수 없습니다.");
-  Object.assign(block, changes, { title: changes.title?.trim() || undefined, updatedAt: new Date().toISOString() });
+  Object.assign(block, changes, { updatedAt: new Date().toISOString() });
   return { workspace: next };
 };
 export const connectionError = (flow: Flow, source: BlockId, target: BlockId): string | undefined => {

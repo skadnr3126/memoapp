@@ -199,7 +199,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .graph-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 auto 12px; max-width: 1400px; font-size: .8rem; }
 .graph-canvas { display: block; padding: 0; min-width: 100%; --node-width: 320px; --node-height: 144px; }
 .graph-node-wrap { position: absolute; width: 320px; transform: none; z-index: 2; }
-.graph-node-wrap .flow-node { min-height: 144px; transform: none; position: relative; display: block; padding: 22px; border-radius: 12px; text-align: left; user-select: none; }
+.graph-node-wrap .flow-node { min-height: 72px; transform: none; position: relative; display: block; padding: 22px; border-radius: 12px; text-align: left; user-select: none; }
 .connection-layer .link-hit { stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
 .connection-layer .link-hit:focus { outline: none; stroke: rgba(60, 120, 160, .25); }
 .connection-layer path.is-selected { stroke: #336db0; stroke-width: 4; }
@@ -219,6 +219,14 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .node-summary-text.is-placeholder { color: #87948b; }
 .node-summary-input { position: absolute; inset: 0; height: 100%; resize: none; overflow: hidden; background: transparent; color: #27332a; outline: none; box-shadow: none; cursor: text; user-select: text; }
 .node-summary-input::placeholder { color: #87948b; }
+.graph-node-wrap .flow-node[style*="height"] .node-summary { height: 100%; overflow: auto; }
+.node-resize { position: absolute; width: 14px; height: 14px; padding: 0; border: 1px solid #398352; border-radius: 3px; background: #fff; opacity: 0; pointer-events: none; touch-action: none; transition: opacity 100ms ease; z-index: 3; }
+.graph-node-wrap:hover .node-resize, .graph-node-wrap:focus-within .node-resize { opacity: 1; pointer-events: auto; }
+.node-resize:focus-visible { outline: 3px solid #398352; outline-offset: 2px; }
+.node-resize-nw { left: -5px; top: -5px; cursor: nwse-resize; }
+.node-resize-ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.node-resize-sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.node-resize-se { right: -5px; bottom: -5px; cursor: nwse-resize; }
 .is-editing .node-summary-text { visibility: hidden; }
 .graph-node-wrap .flow-node.is-editing { border-color: #398352; box-shadow: 0 0 0 3px rgba(57,131,82,.2); cursor: text; }
 .flow-node.connection-first, .flow-node.connection-second { border-width: 1px; }

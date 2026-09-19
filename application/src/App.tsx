@@ -20,6 +20,7 @@ import {
 import { ConnectionState, startConnection, chooseConnectionBlock } from "./domain/connection";
 import { defaultPosition, findFreePosition, NODE_WIDTH } from "./domain/layout";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { FlowCanvas } from "./components/FlowCanvas";
 import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED, type EditorSaveRequest, type EditorSession } from "./editorProtocol";
 import { Sidebar } from "./components/Sidebar";
@@ -45,6 +46,13 @@ function App() {
   const [storageState, setStorageState] = useState<"checking" | "needs-workspace" | "loading" | "ready" | "pending" | "saving" | "error">("checking");
   const [storageError, setStorageError] = useState<string>();
   const [sidebarWidth, setSidebarWidth] = useState(292);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const preferencesRef = useRef({ sidebarWidth, workspaceRoot });
+  preferencesRef.current = { sidebarWidth, workspaceRoot };
+  const savePreferencesRef = useRef<() => Promise<void>>(async () => {});
+  savePreferencesRef.current = async () => {
+    if (preferencesLoaded && isDesktopRuntime()) await invoke("save_ui_preferences", { preferences: preferencesRef.current });
+  };
   const hydratedRef = useRef(false);
   const transitioningRef = useRef(false);
   const saveSequenceRef = useRef(Promise.resolve());
@@ -213,9 +221,25 @@ function App() {
       setStorageState("ready");
       return () => { cancelled = true; };
     }
-    if (!cancelled) setStorageState("needs-workspace");
+    void invoke<{ sidebarWidth?: number; workspaceRoot?: string }>("load_ui_preferences").then(async preferences => {
+      if (cancelled) return;
+      if (typeof preferences.sidebarWidth === "number" && Number.isFinite(preferences.sidebarWidth)) setSidebarWidth(clampSidebarWidth(preferences.sidebarWidth));
+      if (preferences.workspaceRoot) await openWorkspace(preferences.workspaceRoot);
+      else setStorageState("needs-workspace");
+      if (!cancelled) setPreferencesLoaded(true);
+    }).catch(error => {
+      if (cancelled) return;
+      setStorageState("needs-workspace");
+      setStorageError(`화면 설정을 불러오지 못했습니다: ${String(error)}`);
+    });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!preferencesLoaded || storageState === "loading" || storageState === "checking" || storageState === "error") return;
+    const timer = window.setTimeout(() => { void savePreferencesRef.current().catch(error => setStorageError(`화면 설정 저장 실패: ${String(error)}`)); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [sidebarWidth, workspaceRoot, preferencesLoaded, storageState]);
 
   useEffect(() => {
     if (!isDesktopRuntime()) return;
@@ -308,8 +332,8 @@ function App() {
       if (closing || transitioningRef.current) return;
       closing = true;
       transitioningRef.current = true;
-      try { await flushRef.current(); await getCurrentWindow().destroy(); }
-      catch { closing = false; transitioningRef.current = false; }
+      try { await flushRef.current(); await savePreferencesRef.current(); await getCurrentWindow().destroy(); }
+      catch (error) { setStorageError(`종료 전 저장 실패: ${String(error)}`); closing = false; transitioningRef.current = false; }
     }).then((unlisten) => { if (disposed) unlisten(); else stop = unlisten; });
     return () => { disposed = true; stop?.(); };
   }, []);
@@ -365,7 +389,7 @@ function App() {
     if (!result) return;
     const positions = activeFlow.blockIds.map((id, index) => nodePositionsByFlow[activeFlow.id]?.[id] ?? defaultPosition(index));
     const selected = selectedBlockIds.length === 1 ? activeFlow.blockIds.indexOf(selectedBlockIds[0]) : -1;
-    const preferred = selected >= 0 ? { x: positions[selected].x + NODE_WIDTH + 48, y: positions[selected].y } : defaultPosition(activeFlow.blockIds.length);
+    const preferred = selected >= 0 ? { x: positions[selected].x + (positions[selected].width ?? NODE_WIDTH) + 48, y: positions[selected].y } : defaultPosition(activeFlow.blockIds.length);
     const point = position ?? findFreePosition(positions, preferred);
     setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], [result.blockId]: point } }));
     setSelectedBlockIds([result.blockId]); setSelectedLinkId(undefined);

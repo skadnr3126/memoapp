@@ -33,7 +33,7 @@ export const serializeBlock = (block: Block): string => {
     "---",
     `version: ${BLOCK_SCHEMA_VERSION}`,
     `id: ${JSON.stringify(block.id)}`,
-    ...(block.title ? [`title: ${JSON.stringify(block.title)}`] : []),
+    ...(block.title !== undefined ? [`title: ${JSON.stringify(block.title)}`] : []),
     `createdAt: ${JSON.stringify(block.createdAt)}`,
     `updatedAt: ${JSON.stringify(block.updatedAt)}`,
     "---",
@@ -58,7 +58,7 @@ export const deserializeBlock = (source: string): Block => {
   const id = requiredString(metadata.id, "Block ID");
   const createdAt = requiredString(metadata.createdAt, "Block 생성 시각");
   const updatedAt = requiredString(metadata.updatedAt, "Block 수정 시각");
-  const title = metadata.title?.trim() || undefined;
+  const title = metadata.title;
   const afterClosing = source.slice(closingOffset + 4);
   const markdown = afterClosing.startsWith("\n") ? afterClosing.slice(1) : afterClosing;
 
@@ -79,7 +79,8 @@ const stringArray = (value: unknown, label: string): string[] => {
 export const importFlow = (value: unknown): { flow: Flow; legacyPositions?: Record<string, { x: number; y: number }> } => {
   const source = asRecord(value, "Flow");
   const id = requiredString(source.id, "Flow ID");
-  const title = requiredString(source.title, "Flow 제목");
+  if (typeof source.title !== "string") throw new Error("Flow 제목 형식이 올바르지 않습니다.");
+  const title = source.title;
   if (source.version === FLOW_SCHEMA_VERSION) {
     if (!Array.isArray(source.links)) throw new Error("links 목록이 올바르지 않습니다.");
     const links = new Map<string, Link>();
@@ -157,6 +158,12 @@ export const deserializeLayout = (value: unknown): PersistedLayout => {
       const point = asRecord(position, `${blockId}의 좌표`);
       if (typeof point.x !== "number" || typeof point.y !== "number" || !Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error(`${blockId}의 좌표 형식이 올바르지 않습니다.`);
       nodePositionsByFlow[flowId][blockId] = { x: point.x, y: point.y };
+      for (const dimension of ["width", "height"] as const) {
+        const size = point[dimension];
+        if (size === undefined) continue;
+        if (typeof size !== "number" || !Number.isFinite(size) || size < (dimension === "width" ? 80 : 72)) throw new Error(`${blockId}의 크기가 올바르지 않습니다.`);
+        nodePositionsByFlow[flowId][blockId]![dimension] = size;
+      }
     });
   });
   return { version: source.version, nodePositionsByFlow };

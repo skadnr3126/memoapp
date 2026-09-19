@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BlockId, Flow, getDisplayTitle, WorkspaceState } from "../domain/flow";
 import { ConnectionState } from "../domain/connection";
-import { defaultPosition, linkPath, NODE_WIDTH, NODE_HEIGHT } from "../domain/layout";
+import { defaultPosition, linkPath, NODE_WIDTH, NODE_HEIGHT, resizeNode, type Point, type ResizeCorner } from "../domain/layout";
 
-export type NodePosition = { x: number; y: number };
+export type NodePosition = Point;
 type PointerDrag = {
   blockIds: BlockId[];
   startX: number;
@@ -46,20 +46,20 @@ export const findDirectionalNeighbor = (
 ) => {
   const current = positions[currentId];
   if (!current) return undefined;
-  const cx = current.x + NODE_WIDTH / 2;
+  const cx = current.x + (current.width ?? NODE_WIDTH) / 2;
   const cy = current.y + (heights[currentId] ?? NODE_HEIGHT) / 2;
   const candidates = ids.filter((id) => {
     if (id === currentId || !positions[id]) return false;
     const p = positions[id];
-    const x = p.x + NODE_WIDTH / 2, y = p.y + (heights[id] ?? NODE_HEIGHT) / 2;
+    const x = p.x + (p.width ?? NODE_WIDTH) / 2, y = p.y + (heights[id] ?? NODE_HEIGHT) / 2;
     return direction === "ArrowRight" ? x > cx : direction === "ArrowLeft" ? x < cx : direction === "ArrowDown" ? y > cy : y < cy;
   });
   if (!candidates.length) return undefined;
   const horizontal = direction === "ArrowLeft" || direction === "ArrowRight";
   return candidates.sort((a, b) => {
     const pa = positions[a], pb = positions[b];
-    const ax = pa.x + NODE_WIDTH / 2, ay = pa.y + (heights[a] ?? NODE_HEIGHT) / 2;
-    const bx = pb.x + NODE_WIDTH / 2, by = pb.y + (heights[b] ?? NODE_HEIGHT) / 2;
+    const ax = pa.x + (pa.width ?? NODE_WIDTH) / 2, ay = pa.y + (heights[a] ?? NODE_HEIGHT) / 2;
+    const bx = pb.x + (pb.width ?? NODE_WIDTH) / 2, by = pb.y + (heights[b] ?? NODE_HEIGHT) / 2;
     const ap = horizontal ? Math.abs(ax - cx) : Math.abs(ay - cy);
     const ao = horizontal ? Math.abs(ay - cy) : Math.abs(ax - cx);
     const bp = horizontal ? Math.abs(bx - cx) : Math.abs(by - cy);
@@ -102,6 +102,7 @@ export function FlowCanvas({
   const canvasRef = useRef<HTMLDivElement>(null);
   const nodeElementsRef = useRef(new Map<BlockId, HTMLElement>());
   const pointerDragRef = useRef<PointerDrag | undefined>(undefined);
+  const resizeRef = useRef<{ id: string; corner: ResizeCorner; x: number; y: number; rect: Required<Point> } | undefined>(undefined);
   const panDragRef = useRef<(PanDrag & { moved: boolean; blockId?: BlockId; linkId?: string }) | undefined>(undefined);
   const mouseRef = useRef<NodePosition | undefined>(undefined);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -163,8 +164,8 @@ export function FlowCanvas({
   useEffect(() => { if (menu) menuRef.current?.querySelector("button")?.focus(); }, [menu]);
   const positions = Object.fromEntries(flow.blockIds.map((id, index) => [id, nodePositions[id] ?? defaultPosition(index)]));
   const origin = { x: Math.min(0, ...Object.values(positions).map((p) => p.x - 36)), y: Math.min(0, ...Object.values(positions).map((p) => p.y - 36)) };
-  const screenPosition = (id: string) => ({ x: positions[id].x - origin.x, y: positions[id].y - origin.y });
-  const width = Math.max(1200, ...Object.values(positions).map((p) => p.x - origin.x + NODE_WIDTH + 300));
+  const screenPosition = (id: string) => ({ ...positions[id], x: positions[id].x - origin.x, y: positions[id].y - origin.y });
+  const width = Math.max(1200, ...Object.values(positions).map((p) => p.x - origin.x + (p.width ?? NODE_WIDTH) + 300));
   const height = Math.max(800, ...Object.entries(positions).map(([id, p]) => p.y - origin.y + (heights[id] ?? NODE_HEIGHT) + 300));
   const pathBetween = (a: string, b: string) => linkPath(screenPosition(a), screenPosition(b), heights[a], heights[b]);
   const originRef = useRef(origin);
@@ -187,7 +188,7 @@ export function FlowCanvas({
     const x = drag.currentX - drag.startX + viewport.scrollLeft - drag.scrollLeft + originRef.current.x - drag.origin.x;
     const y = drag.currentY - drag.startY + viewport.scrollTop - drag.scrollTop + originRef.current.y - drag.origin.y;
     if (Math.abs(x) > 3 || Math.abs(y) > 3) drag.moved = true;
-    onNodePositionsChange(Object.fromEntries(drag.blockIds.map((id) => [id, { x: drag.positions[id].x + x, y: drag.positions[id].y + y }])));
+    onNodePositionsChange(Object.fromEntries(drag.blockIds.map((id) => [id, { ...drag.positions[id], x: drag.positions[id].x + x, y: drag.positions[id].y + y }])));
   };
 
   const updateSelectionDrag = (clientX: number, clientY: number) => {
@@ -362,8 +363,9 @@ export function FlowCanvas({
           const point = screenPosition(blockId);
           const first = connection.kind !== "idle" && connection.kind !== "first" && connection.first === blockId;
           const second = connection.kind === "ready" && connection.second === blockId;
-          return <div className="node-wrap graph-node-wrap" data-block-id={blockId} style={{ left: point.x, top: point.y }} key={blockId}>
+          return <div className="node-wrap graph-node-wrap" data-block-id={blockId} style={{ left: point.x, top: point.y, width: point.width }} key={blockId}>
             <article ref={(element) => { if (element) nodeElementsRef.current.set(blockId, element); else nodeElementsRef.current.delete(blockId); }}
+              style={{ height: point.height }}
               className={"flow-node" + (editingId === blockId ? " is-editing" : "") + (selectedBlockIdSet.has(blockId) ? " is-selected" : "") + (first ? " connection-first" : "") + (second ? " connection-second" : "")}
               role="button" tabIndex={0} aria-label={getDisplayTitle(block) + (linking ? " 연결 대상으로 선택" : " 편집")}
               onClick={(e) => { if (editingId !== blockId && !suppressClickRef.current) { e.currentTarget.focus(); activate(blockId); } }}
@@ -404,10 +406,10 @@ export function FlowCanvas({
               onPointerCancel={() => { pointerDragRef.current = undefined; stopAutoScroll(); }}>
               <div className="node-summary">
                 <div className={"node-summary-text" + (!block.title ? " is-placeholder" : "")} aria-hidden={editingId === blockId}>
-                  {(editingId === blockId ? summaryDraft : block.title) || "이 블록의 핵심 생각을 적어보세요"}{"\n"}
+                  {(editingId === blockId ? summaryDraft : block.title) ?? ""}{"\n"}
                 </div>
                 {editingId === blockId && <textarea autoFocus className="node-summary-input" defaultValue={block.title ?? ""}
-                  aria-label="블록 요약 편집" placeholder="이 블록의 핵심 생각을 적어보세요"
+                  aria-label="블록 요약 편집"
                   onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}
                   onChange={e => { setSummaryDraft(e.currentTarget.value); onRenameBlock(blockId, e.currentTarget.value); }}
                   onBlur={() => setEditingId(undefined)}
@@ -420,6 +422,30 @@ export function FlowCanvas({
               </div>
               {(first || second) && <span className="connection-order">{first ? "첫 번째" : "두 번째"}</span>}
             </article>
+            {!linking && (["nw", "ne", "sw", "se"] as const).map(corner => <button key={corner} type="button"
+              className={`node-resize node-resize-${corner}`} aria-label={`${corner} 모서리 크기 조절`}
+              onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}
+              onPointerDown={e => {
+                e.stopPropagation(); if (e.button !== 0) return;
+                e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId);
+                onSelectedBlockIdsChange([blockId]);
+                resizeRef.current = { id: blockId, corner, x: e.clientX, y: e.clientY,
+                  rect: { ...positions[blockId], width: point.width ?? NODE_WIDTH, height: heights[blockId] ?? NODE_HEIGHT } };
+              }}
+              onPointerMove={e => {
+                const drag = resizeRef.current;
+                if (!drag || drag.id !== blockId) return;
+                onNodePositionsChange({ [blockId]: resizeNode(drag.rect, drag.corner, e.clientX - drag.x, e.clientY - drag.y) });
+              }}
+              onPointerUp={e => { resizeRef.current = undefined; if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); }}
+              onPointerCancel={() => { resizeRef.current = undefined; }}
+              onLostPointerCapture={() => { resizeRef.current = undefined; }}
+              onKeyDown={e => {
+                if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+                e.preventDefault(); e.stopPropagation();
+                onNodePositionsChange({ [blockId]: resizeNode({ ...positions[blockId], width: point.width ?? NODE_WIDTH, height: heights[blockId] ?? NODE_HEIGHT }, corner,
+                  e.key === "ArrowLeft" ? -10 : e.key === "ArrowRight" ? 10 : 0, e.key === "ArrowUp" ? -10 : e.key === "ArrowDown" ? 10 : 0) });
+              }} />)}
           </div>;
         })}
       </div>
