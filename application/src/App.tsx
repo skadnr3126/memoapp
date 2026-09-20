@@ -103,22 +103,47 @@ function App() {
 
   const activeFlow = workspace.activeFlowId ? workspace.flows.get(workspace.activeFlowId) : undefined;
   const validationErrors = useMemo(() => validateWorkspace(workspace), [workspace]);
-  const prepareSummary = async () => {
+  const prepareSavedWorkspace = async () => {
     const session = workspaceSessionRef.current;
     const root = latestRef.current.workspaceRoot;
-    const flowId = workspaceRef.current.activeFlowId;
-    if (!root || !flowId || transitioningRef.current) throw new Error("작업공간과 Flow를 먼저 선택하세요.");
+    if (!root || transitioningRef.current) throw new Error("작업공간을 먼저 선택하세요.");
     if (await WebviewWindow.getByLabel("editor")) await flushEditor();
     if (session !== workspaceSessionRef.current || root !== latestRef.current.workspaceRoot || transitioningRef.current) throw new Error("작업공간이 변경되었습니다. 다시 시도하세요.");
     const saved = await saveCurrent();
     if (!saved || session !== workspaceSessionRef.current || root !== latestRef.current.workspaceRoot || transitioningRef.current) throw new Error("작업공간이 변경되었습니다. 다시 시도하세요.");
-    return { workspaceRoot: root, input: flowSummaryInput(saved.workspace, flowId) };
+    return saved;
+  };
+  const prepareSummary = async () => {
+    const flowId = workspaceRef.current.activeFlowId;
+    if (!flowId) throw new Error("Flow를 먼저 선택하세요.");
+    const saved = await prepareSavedWorkspace();
+    return { workspaceRoot: saved.workspaceRoot!, input: flowSummaryInput(saved.workspace, flowId) };
   };
 
   const sendEditorSession = async (session: EditorSession) => {
     editorSessionRef.current = session;
     if (!editorReadyRef.current || !isDesktopRuntime()) return;
     await emitTo("editor", EDITOR_LOAD, session);
+  };
+
+  const openCodex = async () => {
+    try {
+      const { workspaceRoot } = await prepareSavedWorkspace();
+      await invoke("open_codex", { workspaceRoot });
+      setMessage("현재 작업공간에서 Codex CLI를 열었습니다.");
+    } catch (error) {
+      setMessage(`Codex CLI 실행 실패: ${String(error)}`);
+    }
+  };
+
+  const openCode = async () => {
+    try {
+      const { workspaceRoot } = await prepareSavedWorkspace();
+      await invoke("open_code", { workspaceRoot });
+      setMessage("현재 작업공간을 VS Code로 열었습니다.");
+    } catch (error) {
+      setMessage(`VS Code 실행 실패: ${String(error)}`);
+    }
   };
 
   const ensureEditorWindow = async () => {
@@ -550,7 +575,8 @@ function App() {
                 <input className="flow-title-input" value={activeFlow.title} onChange={(event) => runCommand("Flow 이름 변경", (current) => renameFlow(current, activeFlow.id, event.currentTarget.value))} aria-label="Flow 이름" />
               </div>
               <div className="workspace-header-actions">
-                <button className="button button-quiet editor-toggle" type="button" onClick={() => void ensureEditorWindow().catch((error) => setMessage(error instanceof Error ? error.message : "편집 창을 열지 못했습니다."))}>편집 창 열기</button>
+                <button className="button button-quiet editor-toggle" type="button" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openCodex()}>Codex CLI 열기</button>
+                <button className="button button-quiet editor-toggle" type="button" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openCode()}>VS Code 열기</button>
                 <div className={`runtime-badge ${storageState === "error" ? "has-error" : ""}`}>{storageBadge}</div>
               </div>
             </header>

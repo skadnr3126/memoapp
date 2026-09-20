@@ -292,6 +292,60 @@ fn migrate_workspace(
     let backup_path = backup(&memo)?;
     commit(&memo, snapshot, Some(backup_path))
 }
+fn codex_terminal(root: &Path) -> Result<std::process::Command, String> {
+    if !root.is_absolute() || !root.is_dir() {
+        return Err("작업공간 경로가 올바르지 않습니다.".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut command = std::process::Command::new("cmd.exe");
+        // Keep the terminal open so CLI errors remain visible; never interpolate the path into shell code.
+        command.args(["/d", "/k", "codex"]).current_dir(root).creation_flags(0x00000010); // CREATE_NEW_CONSOLE
+        Ok(command)
+    }
+    #[cfg(not(windows))]
+    Err("Codex 터미널 열기는 Windows에서 지원합니다.".into())
+}
+
+#[tauri::command]
+fn open_codex(window: tauri::Window, workspace_root: String) -> Result<(), String> {
+    if window.label() != "main" { return Err("메인 창에서만 실행할 수 있습니다.".into()); }
+    codex_terminal(Path::new(&workspace_root))?.spawn()
+        .map_err(|e| io_error("Codex 터미널 실행 실패", e))?;
+    Ok(())
+}
+
+fn code_command(root: &Path) -> Result<std::process::Command, String> {
+    if !root.is_absolute() || !root.is_dir() {
+        return Err("작업공간 경로가 올바르지 않습니다.".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut command = std::process::Command::new("cmd.exe");
+        command.args(["/d", "/c", "code ."]).current_dir(root).creation_flags(0x08000000);
+        Ok(command)
+    }
+    #[cfg(not(windows))]
+    {
+        let mut command = std::process::Command::new("code");
+        command.arg(".").current_dir(root);
+        Ok(command)
+    }
+}
+
+#[tauri::command]
+async fn open_code(window: tauri::Window, workspace_root: String) -> Result<(), String> {
+    if window.label() != "main" { return Err("메인 창에서만 실행할 수 있습니다.".into()); }
+    let output = code_command(Path::new(&workspace_root))?.output()
+        .map_err(|e| io_error("VS Code 실행 실패", e))?;
+    if !output.status.success() {
+        return Err(format!("VS Code 설치와 PATH를 확인하세요: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -304,7 +358,9 @@ pub fn run() {
             migrate_workspace,
             load_ui_preferences,
             save_ui_preferences,
-            summary::summarize_flow
+            summary::summarize_flow,
+            open_codex,
+            open_code
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -313,6 +369,30 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(windows)]
+    fn codex_terminal_keeps_workspace_path_out_of_shell_command() {
+        let temp = Temp::new();
+        let root = temp.0.join("한글 작업공간 & echo unexpected");
+        fs::create_dir(&root).unwrap();
+        let command = codex_terminal(&root).unwrap();
+        assert_eq!(command.get_current_dir(), Some(root.as_path()));
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["/d", "/k", "codex"]);
+        assert!(codex_terminal(Path::new("relative")).is_err());
+        assert!(codex_terminal(&root.join("missing")).is_err());
+    }
+    #[test]
+    #[cfg(windows)]
+    fn code_command_uses_workspace_without_shell_interpolation() {
+        let temp = Temp::new();
+        let root = temp.0.join("한글 작업공간 & echo unexpected");
+        fs::create_dir(&root).unwrap();
+        let command = code_command(&root).unwrap();
+        assert_eq!(command.get_current_dir(), Some(root.as_path()));
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["/d", "/c", "code ."]);
+        assert!(code_command(Path::new("relative")).is_err());
+        assert!(code_command(&root.join("missing")).is_err());
+    }
     struct Temp(PathBuf);
     impl Temp {
         fn new() -> Self {
