@@ -410,6 +410,10 @@ export function FlowCanvas({
                 </div>
                 {editingId === blockId && <textarea autoFocus className="node-summary-input" defaultValue={block.title ?? ""}
                   aria-label="블록 요약 편집"
+                  onFocus={e => {
+                    const end = e.currentTarget.value.length;
+                    e.currentTarget.setSelectionRange(end, end);
+                  }}
                   onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}
                   onChange={e => { setSummaryDraft(e.currentTarget.value); onRenameBlock(blockId, e.currentTarget.value); }}
                   onBlur={() => setEditingId(undefined)}

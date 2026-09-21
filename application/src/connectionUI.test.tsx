@@ -23,6 +23,27 @@ const pointer = (element: Element, type: string, x: number, y: number, button = 
   element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button }));
 });
 describe("summary editing", () => {
+  it("places the caret after the existing summary for Enter and double-click editing", () => {
+    click(nodes()[0]);
+    key(nodes()[0], "Enter");
+    let field = host.querySelector<HTMLTextAreaElement>(".node-summary-input")!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "기존 요약");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    key(field, "Escape");
+
+    key(nodes()[0], "Enter");
+    field = host.querySelector<HTMLTextAreaElement>(".node-summary-input")!;
+    expect(field.selectionStart).toBe(field.value.length);
+    expect(field.selectionEnd).toBe(field.value.length);
+    key(field, "Escape");
+
+    act(() => { nodes()[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
+    field = host.querySelector<HTMLTextAreaElement>(".node-summary-input")!;
+    expect(field.selectionStart).toBe(field.value.length);
+    expect(field.selectionEnd).toBe(field.value.length);
+  });
   it("enters with Enter, saves multiline text, and leaves editing before clearing selection", () => {
     click(nodes()[0]);
     expect(host.querySelector(".node-summary-input")).toBeNull();
