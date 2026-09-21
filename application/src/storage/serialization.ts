@@ -43,12 +43,15 @@ export const serializeBlock = (block: Block): string => {
 };
 
 export const deserializeBlock = (source: string): Block => {
-  if (!source.startsWith("---\n")) throw new Error("Block frontmatter가 없습니다.");
-  const closingOffset = source.indexOf("\n---", 4);
-  if (closingOffset === -1) throw new Error("Block frontmatter가 닫히지 않았습니다.");
+  const content = source.trimStart();
+  const opening = /^---\r?\n/.exec(content);
+  if (!opening) throw new Error("Block frontmatter가 없습니다.");
+  const closing = /\r?\n---(?=\r?\n|$)/.exec(content.slice(opening[0].length));
+  if (!closing) throw new Error("Block frontmatter가 닫히지 않았습니다.");
+  const closingOffset = opening[0].length + closing.index;
 
   const metadata: Record<string, string> = {};
-  source.slice(4, closingOffset).split("\n").forEach((line) => {
+  content.slice(opening[0].length, closingOffset).split(/\r?\n/).forEach((line) => {
     const separator = line.indexOf(":");
     if (separator <= 0) throw new Error("Block frontmatter 항목이 올바르지 않습니다.");
     metadata[line.slice(0, separator).trim()] = parseFrontmatterValue(line.slice(separator + 1));
@@ -59,8 +62,8 @@ export const deserializeBlock = (source: string): Block => {
   const createdAt = requiredString(metadata.createdAt, "Block 생성 시각");
   const updatedAt = requiredString(metadata.updatedAt, "Block 수정 시각");
   const title = metadata.title;
-  const afterClosing = source.slice(closingOffset + 4);
-  const markdown = afterClosing.startsWith("\n") ? afterClosing.slice(1) : afterClosing;
+  const afterClosing = content.slice(closingOffset + closing[0].length);
+  const markdown = afterClosing.replace(/^\r?\n/, "");
 
   return { id, title, markdown, createdAt, updatedAt };
 };

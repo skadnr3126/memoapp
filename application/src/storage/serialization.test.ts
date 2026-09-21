@@ -5,6 +5,11 @@ const block = (id: string) => ({id,title:'따옴표 " 제목',markdown:"# 본문
 const legacy = {version:1,id:"flow_a",title:"Legacy",root:{id:"root",items:["A","B","C"],branches:{A:[{id:"child",items:["D","E"],branches:{D:[{id:"nested",items:["F"],branches:{}}]}},{id:"empty",items:[],branches:{}}]}}};
 describe("storage and migration", () => {
   it("round-trips Markdown without changing content or timestamps",()=>expect(deserializeBlock(serializeBlock(block("A")))).toEqual(block("A")));
+  it("accepts CRLF, BOM, and whitespace before block frontmatter",()=>{
+    const source=serializeBlock(block("A"));
+    expect(deserializeBlock(source.replace(/\n/g,"\r\n")).markdown).toBe("# 본문\r\n\r\n- 항목");
+    expect(deserializeBlock("\uFEFF \r\n"+source)).toEqual(block("A"));
+  });
   it("collects every nested block and exactly the previously visible links",()=>{
     const {flow,legacyPositions}=importFlow(legacy);
     expect(flow.blockIds).toEqual(["A","B","C","D","E","F"]);
