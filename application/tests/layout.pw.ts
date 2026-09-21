@@ -8,7 +8,9 @@ test("cleared text stays empty; all corners resize and moving retains size", asy
   await expect(title).toHaveValue("");
   await title.fill("space works");
   await expect(title).toHaveValue("space works");
-  await page.getByRole("button", { name: "블록 추가", exact: true }).click();
+  await page.keyboard.press("Tab");
+  await page.locator(".flow-canvas-scroll").hover({ position: { x: 100, y: 100 } });
+  await page.keyboard.press("Control+t");
   const node = page.locator(".flow-node").first();
   const southeast = page.getByRole("button", { name: "se 모서리 크기 조절" });
   await expect(southeast).toHaveCSS("opacity", "0");
@@ -39,4 +41,34 @@ test("cleared text stays empty; all corners resize and moving retains size", asy
   const after = (await node.boundingBox())!;
   expect(after.width).toBe(before.width); expect(after.height).toBe(before.height);
   expect(after.x).toBeCloseTo(before.x + 100, 0);
+});
+
+test("overflowing block text remains readable and editable with an inner scrollbar", async ({ page }) => {
+  await page.goto("http://localhost:1420");
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.locator(".flow-canvas-scroll").hover({ position: { x: 100, y: 100 } });
+  await page.keyboard.press("Control+t");
+  const node = page.locator(".flow-node").first();
+  await node.dblclick();
+  const input = page.getByRole("textbox", { name: "블록 요약 편집" });
+  await input.fill(Array.from({ length: 14 }, (_, index) => `${index + 1}번째 줄의 긴 블록 내용`).join("\n"));
+  await page.keyboard.press("Escape");
+
+  await node.hover();
+  const southeast = page.getByRole("button", { name: "se 모서리 크기 조절" });
+  const handle = (await southeast.boundingBox())!;
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2, handle.y - 120, { steps: 5 });
+  await page.mouse.up();
+
+  const text = node.locator(".node-summary-text");
+  expect(await text.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  await text.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  expect(await text.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+
+  await node.dblclick();
+  expect(await input.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  await input.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  expect(await input.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
 });
