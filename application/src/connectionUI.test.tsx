@@ -8,15 +8,20 @@ let host: HTMLDivElement;
 let root: Root;
 const click = (element: Element) => act(() => { element.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
 const key = (element: EventTarget, value: string, extra = {}) => act(() => { element.dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true, ...extra })); });
-const button = (text: string) => [...host.querySelectorAll("button")].find(b => b.textContent === text)!;
 const nodes = () => [...host.querySelectorAll<HTMLElement>("article.flow-node")];
 const links = () => host.querySelectorAll(".link-hit");
 const preview = () => host.querySelector(".link-preview");
+const beginLink = () => key(window, "d", { ctrlKey: true });
+const finishLink = () => key(window, "Enter");
 beforeEach(async () => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   await act(async () => { root.render(<App />); });
   await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true})); });
-  click(button("블록 추가")); click(button("블록 추가")); click(button("블록 추가"));
+  const canvas = host.querySelector(".flow-canvas-scroll")!;
+  for (const [x, y] of [[100, 100], [450, 100], [800, 100]]) {
+    pointer(canvas, "pointermove", x, y, 0);
+    key(window, "t", { ctrlKey: true });
+  }
 });
 afterEach(() => { act(()=>root.unmount()); host.remove(); vi.restoreAllMocks(); });
 const pointer = (element: Element, type: string, x: number, y: number, button = 2) => act(() => {
@@ -82,8 +87,8 @@ describe("summary editing", () => {
     pointer(node.querySelector(".node-summary-text")!, "pointerdown", 100, 100, 0);
     pointer(node, "pointermove", 140, 120, 0);
     pointer(node, "pointerup", 140, 120, 0);
-    expect(node.parentElement!.style.left).toBe("76px");
-    expect(node.parentElement!.style.top).toBe("68px");
+    expect(node.parentElement!.style.left).toBe("140px");
+    expect(node.parentElement!.style.top).toBe("120px");
     expect(host.querySelector(".node-summary-input")).toBeNull();
   });
 });
@@ -109,7 +114,7 @@ describe("node creation gestures", () => {
     pointer(viewport(), "pointerup", 300, 200);
     click(host.querySelector('[role="menuitem"]')!);
     expect(nodes()[0].classList.contains("connection-first")).toBe(true);
-    click(nodes()[1]); click(button("연결 확정"));
+    click(nodes()[1]); finishLink();
     expect(links()).toHaveLength(1);
   });
   it("does not open block actions or change selection after right dragging a block", () => {
@@ -120,8 +125,8 @@ describe("node creation gestures", () => {
     expect(nodes()[2].classList.contains("is-selected")).toBe(true);
   });
   it("deletes only the right-clicked connection and preserves all blocks", () => {
-    click(button("연결 (Ctrl+D)")); click(nodes()[0]); click(button("연결 확정"));
-    click(button("연결 (Ctrl+D)")); click(nodes()[1]); click(button("연결 확정"));
+    beginLink(); click(nodes()[0]); finishLink();
+    beginLink(); click(nodes()[1]); finishLink();
     const first = links()[0]; const second = links()[1];
     click(second);
     pointer(first, "pointerdown", 300, 200);
@@ -133,7 +138,7 @@ describe("node creation gestures", () => {
     expect(nodes()).toHaveLength(3); expect(host.querySelector('[role="menu"]')).toBeNull();
   });
   it("opens the selected connection menu, dismisses it, and suppresses it after dragging", () => {
-    click(button("연결 (Ctrl+D)")); click(nodes()[0]); click(button("연결 확정"));
+    beginLink(); click(nodes()[0]); finishLink();
     click(links()[0]);
     pointer(links()[0], "pointerdown", 300, 200);
     pointer(viewport(), "pointerup", 300, 200);
@@ -179,7 +184,7 @@ describe("node creation gestures", () => {
     pointer(viewport(), "pointerdown", 300, 200);
     pointer(viewport(), "pointerup", 300, 200);
     key(window, "Escape"); expect(host.querySelector('[role="menu"]')).toBeNull();
-    click(button("연결 (Ctrl+D)"));
+    beginLink();
     pointer(viewport(), "pointermove", 300, 200);
     key(window, "t", { ctrlKey: true });
     pointer(viewport(), "pointerdown", 300, 200);
@@ -198,39 +203,39 @@ describe("connection mode UI", () => {
     key(nodes()[0],"Enter");
     expect(preview()).toBeNull(); expect(links().length).toBe(1);
     expect(nodes()[0].classList.contains("is-selected")).toBe(true);
-    expect(button("연결 (Ctrl+D)").disabled).toBe(false);
+    expect(nodes()[0].classList.contains("is-selected")).toBe(true);
   });
   it("starts without selection, selects by clicks, allows target replacement and cancels", () => {
     // Switching flows clears selection without deleting the blocks.
     click(host.querySelector(".flow-list-item")!);
-    click(button("연결 (Ctrl+D)"));
+    beginLink();
     click(nodes()[0]); click(nodes()[1]);
     expect(nodes()[1].classList.contains("connection-second")).toBe(true);
     click(nodes()[2]); expect(nodes()[2].classList.contains("connection-second")).toBe(true);
     key(window,"Escape"); expect(preview()).toBeNull(); expect(links().length).toBe(0);
   });
-  it("confirms with the button and deletes only the selected link", () => {
-    click(button("연결 (Ctrl+D)")); click(nodes()[0]); click(button("연결 확정"));
-    expect(links().length).toBe(1); click(links()[0]); click(button("연결 삭제"));
+  it("confirms and deletes the selected link with the keyboard", () => {
+    beginLink(); click(nodes()[0]); finishLink();
+    expect(links().length).toBe(1); click(links()[0]); key(window, "Delete");
     expect(links().length).toBe(0); expect(nodes().length).toBe(3);
   });
   it("blocks self and reverse duplicate links", () => {
-    click(button("연결 (Ctrl+D)")); click(nodes()[2]); expect(button("연결 확정").disabled).toBe(true);
-    click(nodes()[0]); click(button("연결 확정"));
-    click(button("연결 (Ctrl+D)")); click(nodes()[2]); expect(button("연결 확정").disabled).toBe(true);
-    key(window,"Enter"); expect(preview()).not.toBeNull();
+    key(window, "Escape");
+    beginLink(); click(nodes()[0]); click(nodes()[0]); finishLink(); expect(links().length).toBe(0);
+    click(nodes()[1]); finishLink(); expect(links().length).toBe(1);
+    beginLink(); click(nodes()[0]); finishLink(); expect(preview()).not.toBeNull();
     key(window,"Escape"); expect(links().length).toBe(1);
   });
   it("does not intercept text input and resets on flow changes", () => {
     key(nodes()[0], "Enter");
     const input=host.querySelector(".node-summary-input")!;
-    key(input,"d",{ctrlKey:true}); expect(button("연결 (Ctrl+D)").disabled).toBe(false);
-    click(button("연결 (Ctrl+D)"));click(nodes()[0]);
+    key(input,"d",{ctrlKey:true}); expect(nodes().some(node => node.classList.contains("connection-first"))).toBe(false);
+    key(input,"Escape"); beginLink(); click(nodes()[0]);
     click(host.querySelector(".flow-list-item")!);
-    expect(preview()).toBeNull();expect(button("연결 (Ctrl+D)").disabled).toBe(false);
+    expect(preview()).toBeNull(); expect(nodes().some(node => node.classList.contains("connection-first"))).toBe(false);
   });
   it("deleting one connected block preserves the other blocks", () => {
-    click(button("연결 (Ctrl+D)"));click(nodes()[0]);click(button("연결 확정"));
+    beginLink(); click(nodes()[0]); finishLink();
     key(window,"Delete");expect(nodes().length).toBe(2);expect(links().length).toBe(0);
   });
 });

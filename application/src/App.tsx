@@ -8,7 +8,6 @@ import {
   createBlock,
   connectBlocks,
   disconnectBlocks,
-  connectionError,
   createFlow,
   createWorkspace,
   deleteBlock,
@@ -598,29 +597,18 @@ function App() {
         {activeFlow ? (
           <>
             <header className="workspace-header">
-              <div>
-                <p className="eyebrow">FLOW CANVAS</p>
+              <div className="workspace-title-row">
                 <input className="flow-title-input" value={activeFlow.title} onChange={(event) => runCommand("Flow 이름 변경", (current) => renameFlow(current, activeFlow.id, event.currentTarget.value))} aria-label="Flow 이름" />
+                <FlowSummary key={workspaceRoot} prepare={prepareSummary} />
               </div>
               <div className="workspace-header-actions">
-                <button className="button button-quiet editor-toggle" type="button" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openCodex()}>Codex CLI 열기</button>
-                <button className="button button-quiet editor-toggle" type="button" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openCode()}>VS Code 열기</button>
+                <button className="button button-quiet editor-toggle" type="button" aria-label="Codex CLI 열기" title="Codex CLI 열기" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openCodex()}>Codex</button>
+                <button className="button button-quiet editor-toggle" type="button" aria-label="VS Code 열기" title="VS Code 열기" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openCode()}>Code</button>
                 <div className={`runtime-badge ${storageState === "error" ? "has-error" : ""}`}>{storageBadge}</div>
               </div>
             </header>
-            <div className="command-status" role="status">{message}</div>
-            <FlowSummary key={workspaceRoot} prepare={prepareSummary} />
+            <div className="visually-hidden" role="status">{message}</div>
             {storageError && <div className="storage-error" role="alert">{storageError} <button className="storage-retry" type="button" onClick={() => void retrySave()}>다시 시도</button></div>}
-            <div className="graph-toolbar">
-              <button className="button" onClick={() => addBlock()} disabled={connection.kind !== "idle"}>블록 추가</button>
-              <button className="button" onClick={beginConnection} disabled={connection.kind !== "idle"}>연결 (Ctrl+D)</button>
-              {connection.kind !== "idle" && <>
-                <span role="status">{connection.kind === "first" ? "첫 번째 블록을 선택하세요" : connection.kind === "second" ? "두 번째 블록을 선택하세요" : connectionError(activeFlow, connection.first, connection.second) ?? "Enter 또는 연결 확정으로 완료하세요"}</span>
-                <button className="button button-primary" disabled={connection.kind !== "ready" || !!connectionError(activeFlow, connection.first, connection.second)} onClick={confirmConnection}>연결 확정</button>
-                <button className="button" onClick={() => setConnection({ kind: "idle" })}>취소 (Esc)</button>
-              </>}
-              {selectedLinkId && connection.kind === "idle" && <button className="button button-danger" onClick={deleteSelectedLink}>연결 삭제</button>}
-            </div>
             <div className="flow-work-area">
               <FlowCanvas key={activeFlow.id}
                 onCreateBlock={addBlock}

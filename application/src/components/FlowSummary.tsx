@@ -22,14 +22,14 @@ export function FlowSummary({ prepare }: { prepare: () => Promise<Prepared> }) {
     } catch (error) { setError(String(error)); setStatus(""); }
     finally { running.current = false; setBusy(false); }
   };
-  return <section aria-label="Flow 요약" style={{ padding: "8px 20px" }}>
+  return <section className="flow-summary" aria-label="Flow 요약">
     <button className="button" disabled={busy || !isDesktopRuntime()} onClick={() => void summarize()}>이 Flow 요약</button>
-    <span role="status" style={{ marginLeft: 12 }}>{status}</span>
-    {error && <p role="alert">요약 실패: {error}</p>}
-    {result && <details open>
+    {status && <span role="status" className="flow-summary-status">{status}</span>}
+    {error && <p className="flow-summary-error" role="alert">요약 실패: {error}</p>}
+    {result && <details className="flow-summary-result">
       <summary>요약 Markdown 보기</summary>
-      <p style={{ overflowWrap: "anywhere" }}>{result.path}</p>
-      <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 360, overflow: "auto" }}>{result.markdown}</pre>
+      <p>{result.path}</p>
+      <pre>{result.markdown}</pre>
     </details>}
   </section>;
 }
