@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { EditorWindow } from "./EditorWindow";
 import { EDITOR_LOAD, EDITOR_SAVE, EDITOR_SAVED, EDITOR_FLUSH, EDITOR_FLUSHED } from "./editorProtocol";
+import { EDITOR_CLEAR, EDITOR_LOCK, EDITOR_LOCKED } from "./editorProtocol";
 import type { Editor } from "@tiptap/core";
 
 const mocks = vi.hoisted(() => ({ handlers: new Map<string, (event: { payload: any }) => void>(), emit: vi.fn().mockResolvedValue(undefined) }));
@@ -34,6 +35,38 @@ beforeEach(async () => {
   await act(async () => root.render(<EditorWindow />)); load("a");
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); });
+it("confirms the lock with the main window and keeps editing and saving the pinned document", async () => {
+  const editor = documentEditor();
+  clickButton("잠금");
+  expect(mocks.emit).toHaveBeenCalledWith("main", EDITOR_LOCK, { sessionId: "a", locked: true });
+  expect(host.querySelector<HTMLButtonElement>('button[aria-pressed="false"]')?.disabled).toBe(true);
+  act(() => mocks.handlers.get(EDITOR_LOCKED)!({ payload: { sessionId: "a", locked: true } }));
+  expect(documentEditor()).toBe(editor);
+  expect(host.querySelector('button[aria-pressed="true"]')?.textContent).toBe("잠금 해제");
+  edit("잠금 중 편집");
+  await act(async () => vi.advanceTimersByTime(1000));
+  expect(saves()[0][2]).toMatchObject({ blockId: "a", markdown: "잠금 중 편집" });
+  clickButton("잠금 해제");
+  expect(mocks.emit).toHaveBeenCalledWith("main", EDITOR_LOCK, { sessionId: "a", locked: false });
+  act(() => mocks.handlers.get(EDITOR_LOCKED)!({ payload: { sessionId: "a", locked: false } }));
+  expect(host.querySelector("textarea")!.value).toBe("잠금 중 편집");
+});
+it("clears the lock with the session and ignores stale lock acknowledgements", () => {
+  act(() => mocks.handlers.get(EDITOR_LOCKED)!({ payload: { sessionId: "a", locked: true } }));
+  act(() => mocks.handlers.get(EDITOR_CLEAR)!({ payload: undefined }));
+  expect(host.querySelector("form")).toBeNull();
+  load("b");
+  act(() => mocks.handlers.get(EDITOR_LOCKED)!({ payload: { sessionId: "a", locked: true } }));
+  expect([...host.querySelectorAll("button")].find(button => button.textContent === "잠금")?.getAttribute("aria-pressed")).toBe("false");
+});
+it("allows retrying when the lock request cannot be sent", async () => {
+  mocks.emit.mockRejectedValueOnce(new Error("offline"));
+  await act(async () => clickButton("잠금"));
+  const button = [...host.querySelectorAll("button")].find(button => button.textContent === "잠금")!;
+  expect(button.disabled).toBe(false);
+  expect(button.getAttribute("aria-pressed")).toBe("false");
+  expect(host.textContent).toContain("잠금 상태를 변경하지 못했습니다");
+});
 it("confirms summary flush only after the newest pending draft is acknowledged", async () => {
   edit("first");
   await act(async () => vi.advanceTimersByTime(1000));

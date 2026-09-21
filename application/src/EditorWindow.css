@@ -6,6 +6,7 @@
 .scription-tools > div { flex-shrink: 0; }
 .editor-window button { padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; color: #66756b; font-size: 12px; cursor: pointer; }
 .editor-window button:hover { background: #edf2eb; color: #284c34; }
+.editor-window button[aria-pressed="true"] { background: #e0ecdf; color: #284c34; }
 .editor-window button:focus-visible { outline: 2px solid #74a67d; outline-offset: 2px; }
 .editor-window button:disabled { opacity: .5; cursor: default; }
 .scription-page, .scription-source { width: min(100%, 800px); margin: 0 auto; padding: 32px clamp(24px, 6vw, 64px) 100px; flex: 1; }

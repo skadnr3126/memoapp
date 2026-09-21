@@ -5,10 +5,13 @@ import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED, typ
 import "./EditorWindow.css";
 import { MarkdownDocument } from "./components/MarkdownDocument";
 import { EDITOR_FLUSH, EDITOR_FLUSHED } from "./editorProtocol";
+import { EDITOR_LOCK, EDITOR_LOCKED, type EditorLockState } from "./editorProtocol";
 
 export function EditorWindow() {
   const [session, setSession] = useState<EditorSession>();
   const [markdown, setMarkdown] = useState("");
+  const [locked, setLocked] = useState(false);
+  const [lockPending, setLockPending] = useState(false);
   const [status, setStatus] = useState("변경 내용은 1초마다 자동 저장됩니다.");
   const currentRef = useRef<EditorSession | undefined>(undefined);
   const draftsRef = useRef(new Map<string, EditorSaveRequest>());
@@ -43,6 +46,17 @@ export function EditorWindow() {
     setStatus("변경 내용 저장 대기 중…");
   };
 
+  const toggleLock = () => {
+    const current = currentRef.current;
+    if (!current || lockPending) return;
+    setLockPending(true);
+    void emitTo("main", EDITOR_LOCK, { sessionId: current.sessionId, locked: !locked }).catch(() => {
+      if (currentRef.current?.sessionId !== current.sessionId) return;
+      setLockPending(false);
+      setStatus("잠금 상태를 변경하지 못했습니다. 다시 시도하세요.");
+    });
+  };
+
   useEffect(() => {
     if (!isDesktopRuntime()) return;
 
@@ -50,12 +64,18 @@ export function EditorWindow() {
     let clearListener: UnlistenFn | undefined;
     let savedListener: UnlistenFn | undefined;
     let flushListener: UnlistenFn | undefined;
+    let lockListener: UnlistenFn | undefined;
     let disposed = false;
+    const lockReady = listen<EditorLockState>(EDITOR_LOCKED, ({ payload }) => {
+      if (payload.sessionId !== currentRef.current?.sessionId) return;
+      setLocked(payload.locked);
+      setLockPending(false);
+    }).then(stop => { if (disposed) stop(); else lockListener = stop; });
     const flushReady = listen<{ requestId: string }>(EDITOR_FLUSH, ({ payload }) => {
       flushRequestsRef.current.add(payload.requestId);
       flush(); confirmFlush();
     }).then(stop => { if (disposed) stop(); else flushListener = stop; });
-    void listen(EDITOR_CLEAR, () => { confirmFlush("편집 세션이 변경되었습니다. 다시 시도하세요."); currentRef.current = undefined; draftsRef.current.clear(); pendingRef.current.clear(); setSession(undefined); setMarkdown(""); }).then((stop) => { if (disposed) stop(); else clearListener = stop; });
+    void listen(EDITOR_CLEAR, () => { confirmFlush("편집 세션이 변경되었습니다. 다시 시도하세요."); currentRef.current = undefined; draftsRef.current.clear(); pendingRef.current.clear(); setSession(undefined); setMarkdown(""); setLocked(false); setLockPending(false); }).then((stop) => { if (disposed) stop(); else clearListener = stop; });
     const ready = listen<EditorSaveResult>(EDITOR_SAVED, ({ payload: { request, error } }) => {
       pendingRef.current.delete(request.sessionId);
       const draft = draftsRef.current.get(request.sessionId);
@@ -83,6 +103,8 @@ export function EditorWindow() {
         draftsRef.current.set(payload.sessionId, { ...payload });
       }
       currentRef.current = payload;
+      setLocked(false);
+      setLockPending(false);
       setSession(payload);
       setMarkdown(payload.markdown);
       setStatus("변경 내용은 1초마다 자동 저장됩니다.");
@@ -92,7 +114,7 @@ export function EditorWindow() {
         return;
       }
       unlisten = stop;
-      void Promise.all([ready, flushReady]).then(() => { if (!disposed) void emitTo("main", EDITOR_READY); });
+      void Promise.all([ready, flushReady, lockReady]).then(() => { if (!disposed) void emitTo("main", EDITOR_READY); });
     });
     const timer = window.setInterval(flush, 1000);
     window.addEventListener("blur", flush);
@@ -103,6 +125,7 @@ export function EditorWindow() {
       clearListener?.();
       savedListener?.();
       flushListener?.();
+      lockListener?.();
       window.clearInterval(timer);
       window.removeEventListener("blur", flush);
     };
@@ -119,7 +142,11 @@ export function EditorWindow() {
     }}>
       {session ? (
         <form className="editor-window-content" onSubmit={save}>
-          <MarkdownDocument key={session.sessionId} title={session.title} markdown={markdown} onChange={change} />
+          <MarkdownDocument key={session.sessionId} title={session.title} markdown={markdown} onChange={change}
+            toolbar={<button type="button" aria-pressed={locked} disabled={lockPending} onClick={toggleLock}
+              title={locked ? "잠금 해제 후 다음 블록 선택부터 전환됩니다." : "다른 블록을 선택해도 이 문서를 유지합니다."}>
+              {locked ? "잠금 해제" : "잠금"}
+            </button>} />
           <footer><small role="status">{status}</small><button type="submit">저장</button></footer>
         </form>
       ) : (

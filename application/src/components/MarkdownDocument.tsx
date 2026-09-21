@@ -1,10 +1,10 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { documentExtensions, requiresSource } from "./markdownConfig";
 
-type Props = { markdown: string; title?: string; onChange: (markdown: string) => void };
+type Props = { markdown: string; title?: string; onChange: (markdown: string) => void; toolbar?: ReactNode };
 
-export function MarkdownDocument({ markdown, title = "", onChange }: Props) {
+export function MarkdownDocument({ markdown, title = "", onChange, toolbar }: Props) {
   const fullTitle = title.replace(/\s+/g, " ").trim();
   const prefix = Array.from(fullTitle.split(" ").slice(0, 2).join(" ")).slice(0, 18).join("");
   const titleHint = fullTitle ? prefix + (prefix.length < fullTitle.length ? "..." : "") : "요약 없는 블록";
@@ -53,6 +53,7 @@ export function MarkdownDocument({ markdown, title = "", onChange }: Props) {
     <div className="scription-tools">
       <span className="scription-block-hint" title={fullTitle || titleHint}>{titleHint}</span>
       <div>
+        {toolbar}
         <button type="button" aria-expanded={help} onClick={() => setHelp(!help)}>문법 안내</button>
         <button type="button" onClick={switchMode} disabled={source && unsupported} aria-pressed={source}>
           {source ? "문서 보기" : "마크다운 원문"}

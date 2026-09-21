@@ -23,6 +23,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { FlowCanvas } from "./components/FlowCanvas";
 import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED, type EditorSaveRequest, type EditorSession } from "./editorProtocol";
+import { EDITOR_LOCK, EDITOR_LOCKED, type EditorLockState } from "./editorProtocol";
 import { Sidebar } from "./components/Sidebar";
 import {
   NodePositionsByFlow,
@@ -62,6 +63,7 @@ function App() {
   const editorReadyRef = useRef(false);
   const editorOpeningRef = useRef<Promise<void> | undefined>(undefined);
   const editorSessionRef = useRef<EditorSession | undefined>(undefined);
+  const editorLockedRef = useRef(false);
   const issuedEditorSessionsRef = useRef(new Map<string, string>());
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
@@ -95,6 +97,7 @@ function App() {
   const flushRef = useRef(saveCurrent);
   flushRef.current = saveCurrent;
   const clearEditor = () => {
+    editorLockedRef.current = false;
     issuedEditorSessionsRef.current.clear();
     editorSessionRef.current = undefined;
     if (isDesktopRuntime()) void emitTo("editor", EDITOR_CLEAR);
@@ -330,6 +333,7 @@ function App() {
     let unlisten: UnlistenFn | undefined;
     let disposed = false;
     void listen(EDITOR_READY, () => {
+      editorLockedRef.current = false;
       editorReadyRef.current = true;
       const session = editorSessionRef.current;
       if (session) void sendEditorSession(session);
@@ -345,6 +349,29 @@ function App() {
       disposed = true;
       void unlisten?.();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!isDesktopRuntime()) return;
+    let disposed = false;
+    const stops: UnlistenFn[] = [];
+    const listeners = [
+      listen<EditorLockState>(EDITOR_LOCK, ({ payload }) => {
+        const session = editorSessionRef.current;
+        if (!session) return;
+        if (session.sessionId === payload.sessionId && typeof payload.locked === "boolean") {
+          editorLockedRef.current = payload.locked;
+        }
+        void emitTo("editor", EDITOR_LOCKED, { sessionId: session.sessionId, locked: editorLockedRef.current });
+      }),
+      listen("tauri://destroyed", () => {
+        editorLockedRef.current = false;
+        editorReadyRef.current = false;
+        editorSessionRef.current = undefined;
+      }, { target: { kind: "WebviewWindow", label: "editor" } }),
+    ];
+    for (const listener of listeners) void listener.then(stop => { if (disposed) stop(); else stops.push(stop); });
+    return () => { disposed = true; for (const stop of stops) stop(); };
   }, []);
 
   useEffect(() => {
@@ -405,6 +432,7 @@ function App() {
     const block = source.blocks.get(blockId);
     if (!block) return;
     setSelectedBlockIds([blockId]);
+    if (editorLockedRef.current) return;
     if (editorSessionRef.current?.blockId === blockId) return;
     const session: EditorSession = {
       sessionId: crypto.randomUUID(), workspaceSession: workspaceSessionRef.current,
