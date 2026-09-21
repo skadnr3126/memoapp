@@ -45,9 +45,10 @@ function App() {
   const [selectedLinkId, setSelectedLinkId] = useState<string>();
   const workspaceSessionRef = useRef(crypto.randomUUID());
   const [workspaceRoot, setWorkspaceRoot] = useState<string>();
-  const [storageState, setStorageState] = useState<"checking" | "needs-workspace" | "loading" | "ready" | "pending" | "saving" | "error">("checking");
+  const [storageState, setStorageState] = useState<"checking" | "needs-workspace" | "loading" | "ready" | "error">("checking");
   const [storageError, setStorageError] = useState<string>();
   const [sidebarWidth, setSidebarWidth] = useState(292);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const preferencesRef = useRef({ sidebarWidth, workspaceRoot });
   preferencesRef.current = { sidebarWidth, workspaceRoot };
@@ -75,15 +76,13 @@ function App() {
     const current = { ...latestRef.current, workspace: workspaceRef.current };
     if (!current.workspaceRoot || !hydratedRef.current || !isDesktopRuntime()) return;
     const revision = ++saveRevisionRef.current;
-    setStorageState("saving");
     const pending = saveSequenceRef.current.catch(() => undefined).then(() => saveNativeWorkspace(current.workspaceRoot!, current.workspace, current.nodePositionsByFlow));
     saveSequenceRef.current = pending;
     try {
       await pending;
       savedStateRef.current = { workspace: current.workspace, positions: current.nodePositionsByFlow };
       if (revision === saveRevisionRef.current && latestRef.current.workspaceRoot === current.workspaceRoot) {
-        const isCurrent = latestRef.current.workspace === current.workspace && latestRef.current.nodePositionsByFlow === current.nodePositionsByFlow;
-        setStorageState(isCurrent ? "ready" : "pending"); setStorageError(undefined);
+        setStorageState("ready"); setStorageError(undefined);
       }
       return current;
     } catch (error) {
@@ -382,7 +381,6 @@ function App() {
   useEffect(() => {
     if (!workspaceRoot || !hydratedRef.current || !isDesktopRuntime()) return;
     if (savedStateRef.current?.workspace === workspace && savedStateRef.current.positions === nodePositionsByFlow) return;
-    setStorageState("pending");
     const timer = window.setTimeout(() => { void saveCurrent().catch(() => undefined); }, 650);
     return () => window.clearTimeout(timer);
   }, [workspace, workspaceRoot, nodePositionsByFlow]);
@@ -554,17 +552,10 @@ function App() {
     );
   }
 
-  const storageBadge = !isDesktopRuntime()
-    ? "IN MEMORY · 저장되지 않음"
-    : storageState === "saving"
-      ? "저장 중"
-      : storageState === "pending" ? "저장 대기" : storageState === "error"
-        ? "저장 실패"
-        : "저장됨";
-
   return (
-    <main className="app-shell" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+    <main className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`} style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
       <Sidebar
+        collapsed={sidebarCollapsed}
         flows={[...workspace.flows.values()]}
         activeFlowId={activeFlow?.id}
         validationErrors={validationErrors}
@@ -582,6 +573,7 @@ function App() {
         onChooseWorkspace={chooseWorkspace}
       />
       <div
+        hidden={sidebarCollapsed}
         className="sidebar-resizer"
         role="separator"
         aria-label="사이드바 너비 조절"
@@ -594,19 +586,30 @@ function App() {
         onKeyDown={resizeSidebarWithKeyboard}
       />
       <section className="workspace">
-        {activeFlow ? (
-          <>
             <header className="workspace-header">
               <div className="workspace-title-row">
+                <button className="button button-quiet sidebar-toggle" type="button"
+                  aria-label={sidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+                  title={sidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+                  aria-expanded={!sidebarCollapsed} aria-controls="flow-sidebar"
+                  onClick={() => setSidebarCollapsed(current => !current)}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" />
+                    <path d={sidebarCollapsed ? "m13 9 3 3-3 3" : "m17 9-3 3 3 3"} />
+                  </svg>
+                </button>
+                {activeFlow && <>
                 <input className="flow-title-input" value={activeFlow.title} onChange={(event) => runCommand("Flow 이름 변경", (current) => renameFlow(current, activeFlow.id, event.currentTarget.value))} aria-label="Flow 이름" />
                 <FlowSummary key={workspaceRoot} prepare={prepareSummary} />
+                </>}
               </div>
-              <div className="workspace-header-actions">
+              {activeFlow && <div className="workspace-header-actions">
                 <button className="button button-quiet editor-toggle" type="button" aria-label="Codex CLI 열기" title="Codex CLI 열기" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openCodex()}>Codex</button>
                 <button className="button button-quiet editor-toggle" type="button" aria-label="VS Code 열기" title="VS Code 열기" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openCode()}>Code</button>
-                <div className={`runtime-badge ${storageState === "error" ? "has-error" : ""}`}>{storageBadge}</div>
-              </div>
+              </div>}
             </header>
+        {activeFlow ? (
+          <>
             <div className="visually-hidden" role="status">{message}</div>
             {storageError && <div className="storage-error" role="alert">{storageError} <button className="storage-retry" type="button" onClick={() => void retrySave()}>다시 시도</button></div>}
             <div className="flow-work-area">

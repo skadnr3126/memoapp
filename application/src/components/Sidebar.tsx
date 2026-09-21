@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { Flow, FlowId } from "../domain/flow";
 
 type SidebarProps = {
+  collapsed?: boolean;
   flows: Flow[];
   activeFlowId?: FlowId;
   validationErrors: string[];
@@ -16,7 +17,7 @@ type SidebarProps = {
 const getNodeCount = (flow: Flow) =>
   flow.blockIds.length;
 
-export function Sidebar({ flows, activeFlowId, validationErrors, workspaceRoot, onCreateFlow, onSelectFlow, onDeleteFlow, onReturnToWorkspaceSelection ,onChooseWorkspace}: SidebarProps) {
+export function Sidebar({ collapsed = false, flows, activeFlowId, validationErrors, workspaceRoot, onCreateFlow, onSelectFlow, onDeleteFlow, onReturnToWorkspaceSelection ,onChooseWorkspace}: SidebarProps) {
   const [newFlowTitle, setNewFlowTitle] = useState("");
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -25,7 +26,7 @@ export function Sidebar({ flows, activeFlowId, validationErrors, workspaceRoot, 
   };
 
   return (
-    <aside className="sidebar">
+    <aside id="flow-sidebar" className="sidebar" hidden={collapsed}>
       <button className="button workspace-switch-button" type="button" onClick={onReturnToWorkspaceSelection}>처음으로 돌아가기</button>
       <div className="brand">
         <span className="brand-mark">M</span>

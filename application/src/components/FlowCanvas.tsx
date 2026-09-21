@@ -357,7 +357,7 @@ export function FlowCanvas({
             <path className="link-preview" d={pathBetween(connection.first, connection.second)} />}
         </svg>
         {selectionStyle && <div className="selection-marquee" style={selectionStyle} aria-hidden="true" />}
-        {!flow.blockIds.length && <p className="canvas-empty">블록 추가 버튼으로 첫 메모를 만드세요.</p>}
+        {!flow.blockIds.length && <p className="canvas-empty">빈 공간을 우클릭하거나 Ctrl+T로 첫 메모를 만드세요.</p>}
         {flow.blockIds.map((blockId) => {
           const block = workspace.blocks.get(blockId)!;
           const point = screenPosition(blockId);
