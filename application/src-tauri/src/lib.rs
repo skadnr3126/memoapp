@@ -344,6 +344,8 @@ pub fn run() {
             load_workspace_preferences,
             restore_editor_preferences,
             recent_workspaces,
+            summary::has_openrouter_api_key,
+            summary::save_openrouter_api_key,
             summary::summarize_flow,
             open_codex,
             open_code
