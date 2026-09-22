@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { isDesktopRuntime } from "../storage/repository";
 import { flowSummaryInput } from "../flowSummary";
 
@@ -43,14 +44,26 @@ export function FlowSummary({ prepare }: { prepare: () => Promise<Prepared> }) {
       setError(String(error).replace(/^OPENROUTER_KEY_INVALID:/, "")); setStatus("");
     } finally { setBusy(false); }
   };
+  const deleteKey = async () => {
+    if (!window.confirm("저장된 OpenRouter API 키를 삭제할까요?")) return;
+    setBusy(true); setError("");
+    try {
+      await invoke("delete_openrouter_api_key");
+      setApiKey(""); setNeedsKey(true); setResult(undefined); setStatus("API 키를 삭제했습니다.");
+    } catch (error) {
+      setError(String(error)); setStatus("");
+    } finally { setBusy(false); }
+  };
   return <section className="flow-summary" aria-label="Flow 요약">
     <button className="button" disabled={busy || !isDesktopRuntime()} onClick={() => void summarize()}>이 Flow 요약</button>
+    <button className="button" disabled={busy || !isDesktopRuntime()} onClick={() => void deleteKey()}>API 키 삭제</button>
     {status && <span role="status" className="flow-summary-status">{status}</span>}
     {needsKey && <form className="flow-summary-key" onSubmit={event => void registerKey(event)}>
+      <button type="button" className="flow-summary-key-close" aria-label="API 키 등록 닫기" onClick={() => { setNeedsKey(false); setApiKey(""); setError(""); }}>×</button>
       <label htmlFor="openrouter-api-key">OpenRouter API 키</label>
       <input id="openrouter-api-key" type="password" autoComplete="off" value={apiKey} onChange={event => setApiKey(event.target.value)} required autoFocus />
       <button className="button button-primary" disabled={busy}>등록하고 요약</button>
-      <small>키는 Windows 자격 증명 관리자에 저장됩니다. 무료 모델 라우터를 사용합니다.</small>
+      <small><a href="https://openrouter.ai/keys" onClick={event => { event.preventDefault(); void openUrl(event.currentTarget.href); }}>OpenRouter에서 API 키 받기</a> · 키는 Windows 자격 증명 관리자에 저장됩니다.</small>
       {error && <span className="flow-summary-key-error" role="alert">등록 실패: {error}</span>}
     </form>}
     {error && !needsKey && <p className="flow-summary-error" role="alert">요약 실패: {error}</p>}

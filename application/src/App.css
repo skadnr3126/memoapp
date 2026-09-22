@@ -105,12 +105,14 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 }
 .flow-title-input:focus { border-bottom: 2px solid #5e9c6c; box-shadow: none; }
 .storage-error { max-width: 1400px; margin: 0 auto 14px; color: #9a3b35; font-size: .78rem; line-height: 1.45; }
+.workspace-status { margin-bottom: 8px; color: #617267; font-size: .78rem; overflow-wrap: anywhere; }
 .storage-retry { margin-left: 6px; padding: 2px 6px; border: 1px solid #d69a92; border-radius: 5px; color: inherit; background: #fff4f2; font-size: inherit; font-weight: 700; }
 
 .flow-summary { position: relative; display: flex; flex: none; align-items: center; gap: 8px; }
 .flow-summary-status { max-width: 170px; overflow: hidden; color: #617267; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
 .flow-summary-error, .flow-summary-result { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; width: min(560px, calc(100vw - 48px)); margin: 0; padding: 12px; border: 1px solid #d6dbd2; border-radius: 9px; background: #fffefb; box-shadow: 0 10px 28px rgba(16,30,21,.16); }
 .flow-summary-key { position: absolute; z-index: 31; top: calc(100% + 8px); left: 0; display: grid; width: min(360px, calc(100vw - 48px)); gap: 8px; padding: 12px; border: 1px solid #d6dbd2; border-radius: 9px; background: #fffefb; box-shadow: 0 10px 28px rgba(16,30,21,.16); }
+.flow-summary-key-close { position: absolute; top: 6px; right: 6px; border: 0; background: transparent; color: #617267; font-size: 1.1rem; cursor: pointer; }
 .flow-summary-key label { color: #31583a; font-size: .75rem; font-weight: 700; }
 .flow-summary-key input { min-width: 0; padding: 8px; border: 1px solid #cbd3c9; border-radius: 6px; }
 .flow-summary-key small { color: #617267; }

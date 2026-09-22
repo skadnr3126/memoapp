@@ -3,8 +3,9 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { FlowSummary } from "./FlowSummary";
-const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), openUrl: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: mocks.openUrl }));
 vi.mock("../storage/repository", () => ({ isDesktopRuntime: () => true }));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -33,5 +34,16 @@ it("checks the OpenRouter key before saving and renders its output as text", asy
     mocks.invoke.mockReset().mockResolvedValue(false);
     await act(async () => { host.querySelector("button")!.click(); });
     expect(host.querySelector<HTMLInputElement>('#openrouter-api-key')?.type).toBe("password");
+    const link = host.querySelector<HTMLAnchorElement>('a[href="https://openrouter.ai/keys"]')!;
+    link.click();
+    expect(mocks.openUrl).toHaveBeenCalledWith("https://openrouter.ai/keys");
+    await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="API 키 등록 닫기"]')!.click(); });
+    expect(host.querySelector('#openrouter-api-key')).toBeNull();
+    await act(async () => { host.querySelector("button")!.click(); });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.invoke.mockClear();
+    await act(async () => { Array.from(host.querySelectorAll("button")).find(button => button.textContent === "API 키 삭제")!.click(); });
+    expect(mocks.invoke).toHaveBeenCalledWith("delete_openrouter_api_key");
+    expect(host.querySelector('[role="status"]')?.textContent).toBe("API 키를 삭제했습니다.");
   } finally { act(() => root.unmount()); }
 });

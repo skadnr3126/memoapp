@@ -8,7 +8,7 @@ import { createWorkspace } from "./domain/flow";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), open: vi.fn(), close: undefined as undefined | ((event: { preventDefault: () => void }) => Promise<void>), destroy: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ emitTo: vi.fn().mockResolvedValue(undefined), listen: vi.fn(async () => () => {}) }));
-vi.mock("@tauri-apps/api/webviewWindow", () => ({ WebviewWindow: { getByLabel: vi.fn(async () => ({})) } }));
+vi.mock("@tauri-apps/api/webviewWindow", () => ({ WebviewWindow: { getByLabel: vi.fn(async () => ({ setFocus: vi.fn() })) } }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ destroy: mocks.destroy, onCloseRequested: async (handler: typeof mocks.close) => { mocks.close = handler; return () => {}; } }) }));
 vi.mock("./storage/repository", async importOriginal => ({ ...await importOriginal<object>(), isDesktopRuntime: () => true, openNativeWorkspace: mocks.open, saveNativeWorkspace: vi.fn().mockResolvedValue(undefined) }));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
