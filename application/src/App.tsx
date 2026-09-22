@@ -50,6 +50,7 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(292);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
   const preferencesRef = useRef({ sidebarWidth, workspaceRoot });
   preferencesRef.current = { sidebarWidth, workspaceRoot };
   const savePreferencesRef = useRef<() => Promise<void>>(async () => {});
@@ -167,6 +168,7 @@ function App() {
     editorOpeningRef.current = opening;
     try {
       await opening;
+      await invoke("restore_editor_preferences", { workspaceRoot: latestRef.current.workspaceRoot });
     } finally {
       editorOpeningRef.current = undefined;
     }
@@ -176,13 +178,16 @@ function App() {
     if (transitioningRef.current) return;
     transitioningRef.current = true;
     setStorageState("loading");
-    try { await saveCurrent(); } catch { transitioningRef.current = false; return; }
+    try { await saveCurrent(); await savePreferencesRef.current(); } catch (error) { transitioningRef.current = false; setStorageState("error"); setStorageError(String(error)); return; }
     setStorageState("loading");
     setStorageError(undefined);
     hydratedRef.current = false;
     clearEditor();
     try {
       const loaded = await openNativeWorkspace(path.trim());
+      const preferences = await invoke<{ sidebarWidth?: number }>("load_workspace_preferences", { workspaceRoot: loaded.workspaceRoot });
+      setSidebarWidth(clampSidebarWidth(preferences?.sidebarWidth ?? 292));
+      setSidebarCollapsed(false);
       workspaceSessionRef.current = crypto.randomUUID();
       clearEditor(); resetInteraction();
       workspaceRef.current = loaded.workspace;
@@ -194,6 +199,8 @@ function App() {
       setMessage(loaded.recoveryNotice ?? "작업공간을 열었습니다.");
       setStorageState("ready");
       hydratedRef.current = true;
+      try { setRecentWorkspaces(await invoke<string[]>("recent_workspaces", { opened: loaded.workspaceRoot })); }
+      catch (error) { setStorageError(`최근 폴더 저장 실패: ${String(error)}`); }
     } catch (error) {
       setWorkspaceRoot(undefined);
       setStorageError(error instanceof Error ? error.message : "작업공간을 열 수 없습니다.");
@@ -219,7 +226,7 @@ function App() {
   const returnToWorkspaceSelection = async () => {
     if (transitioningRef.current) return;
     transitioningRef.current = true;
-    try { await saveCurrent(); } catch { transitioningRef.current = false; return; }
+    try { await saveCurrent(); await savePreferencesRef.current(); } catch (error) { transitioningRef.current = false; setStorageError(String(error)); return; }
     hydratedRef.current = false;
     clearEditor(); resetInteraction();
     setWorkspaceRoot(undefined);
@@ -261,11 +268,10 @@ function App() {
       setStorageState("ready");
       return () => { cancelled = true; };
     }
-    void invoke<{ sidebarWidth?: number; workspaceRoot?: string }>("load_ui_preferences").then(async preferences => {
+    void invoke<string[]>("recent_workspaces").then(items => {
       if (cancelled) return;
-      if (typeof preferences.sidebarWidth === "number" && Number.isFinite(preferences.sidebarWidth)) setSidebarWidth(clampSidebarWidth(preferences.sidebarWidth));
-      if (preferences.workspaceRoot) await openWorkspace(preferences.workspaceRoot);
-      else setStorageState("needs-workspace");
+      setRecentWorkspaces(items ?? []);
+      setStorageState("needs-workspace");
       if (!cancelled) setPreferencesLoaded(true);
     }).catch(error => {
       if (cancelled) return;
@@ -546,6 +552,14 @@ function App() {
         <h2>생각을 저장할 폴더를 선택하세요.</h2>
         <p>선택한 폴더 안에 <code>.memo</code> 작업공간을 만들고, Block과 Flow를 파일로 저장합니다.</p>
         <button className="button button-primary workspace-picker-button" type="button" onClick={() => void chooseWorkspace()}>폴더 선택</button>
+        {recentWorkspaces.length > 0 && <section aria-label="최근 폴더"><h3>최근 폴더</h3><ul className="recent-workspaces">
+          {recentWorkspaces.map(path => <li key={path}>
+            <button className="button" onClick={() => void openWorkspace(path)}>{path}</button>
+            <button className="button button-quiet" aria-label={`${path} 목록에서 제거`} onClick={() => {
+              void invoke<string[]>("recent_workspaces", { removed: path }).then(setRecentWorkspaces).catch(error => setStorageError(String(error)));
+            }}>제거</button>
+          </li>)}
+        </ul></section>}
         {storageError && <p className="storage-error" role="alert">{storageError}</p>}
         <p className="workspace-setup-note">브라우저 개발 모드에서는 기존처럼 메모리에서만 동작합니다.</p>
       </main>

@@ -13,18 +13,20 @@ vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ destroy: m
 vi.mock("./storage/repository", async importOriginal => ({ ...await importOriginal<object>(), isDesktopRuntime: () => true, openNativeWorkspace: mocks.open, saveNativeWorkspace: vi.fn().mockResolvedValue(undefined) }));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-it("loads preferences before saving, reopens the workspace and flushes the latest sidebar width on close", async () => {
+it("shows recent folders without opening automatically and restores folder preferences before saving", async () => {
   vi.useFakeTimers();
   let resolve!: (value: unknown) => void;
-  mocks.invoke.mockImplementation((command: string) => command === "load_ui_preferences" ? new Promise(r => { resolve = r; }) : Promise.resolve());
+  mocks.invoke.mockImplementation((command: string, args?: { opened?: string }) => command === "recent_workspaces" ? (args?.opened ? Promise.resolve(["D:/notes"]) : new Promise(r => { resolve = r; })) : Promise.resolve(command === "load_workspace_preferences" ? { sidebarWidth: 360 } : undefined));
   mocks.open.mockResolvedValue({ workspaceRoot: "D:/notes", workspace: createWorkspace(), nodePositionsByFlow: {} });
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
   try {
     await act(async () => { root.render(<App />); });
     await act(async () => { vi.advanceTimersByTime(1000); });
-    expect(mocks.invoke.mock.calls.map(call => call[0])).toEqual(["load_ui_preferences"]);
-    await act(async () => { resolve({ sidebarWidth: 360, workspaceRoot: "D:/notes" }); });
+    expect(mocks.invoke.mock.calls.map(call => call[0])).toEqual(["recent_workspaces"]);
+    await act(async () => { resolve(["D:/notes"]); });
+    expect(mocks.open).not.toHaveBeenCalled();
+    await act(async () => { (Array.from(host.querySelectorAll("button")).find(b => b.textContent === "D:/notes")!).click(); });
     expect(mocks.open).toHaveBeenCalledWith("D:/notes");
     expect((host.querySelector(".app-shell") as HTMLElement).style.getPropertyValue("--sidebar-width")).toBe("360px");
     await act(async () => { host.querySelector("[role=separator]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });

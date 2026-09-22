@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 mod summary;
+mod preferences;
+use preferences::{save_ui_preferences, load_workspace_preferences, restore_editor_preferences, recent_workspaces};
 use std::{
     collections::HashSet,
     fs,
@@ -8,8 +10,6 @@ use std::{
     sync::Mutex,
 };
 static STORAGE_LOCK: Mutex<()> = Mutex::new(());
-use tauri::Manager;
-use tauri_plugin_window_state::AppHandleExt;
 
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,26 +18,6 @@ struct UiPreferences {
     workspace_root: Option<String>,
 }
 
-#[tauri::command]
-fn load_ui_preferences(app: tauri::AppHandle) -> Result<UiPreferences, String> {
-    let path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("ui-preferences.json");
-    match fs::read_to_string(path) {
-        Ok(content) => serde_json::from_str(&content).map_err(|e| io_error("화면 설정 읽기 실패", e)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(UiPreferences::default()),
-        Err(e) => Err(io_error("화면 설정 읽기 실패", e)),
-    }
-}
-
-#[tauri::command]
-fn save_ui_preferences(app: tauri::AppHandle, preferences: UiPreferences) -> Result<(), String> {
-    if preferences.sidebar_width.is_some_and(|width| !width.is_finite() || !(8.0..=480.0).contains(&width)) {
-        return Err("사이드바 너비가 올바르지 않습니다.".into());
-    }
-    let _lock = STORAGE_LOCK.lock().map_err(|_| "저장 잠금 오류")?;
-    let path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("ui-preferences.json");
-    write_atomic(&path, &serde_json::to_string_pretty(&preferences).map_err(|e| e.to_string())?)?;
-    app.save_window_state(tauri_plugin_window_state::StateFlags::all()).map_err(|e| e.to_string())
-}
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct StorageFile {
@@ -245,6 +225,7 @@ fn backup(memo: &Path) -> Result<String, String> {
 }
 #[tauri::command]
 fn open_workspace(workspace_root: String) -> Result<LoadedWorkspace, String> {
+    if !Path::new(&workspace_root).is_dir() { return Err("작업공간 폴더가 존재하지 않습니다.".into()); }
     let _lock = STORAGE_LOCK.lock().map_err(|_| "저장 잠금 오류")?;
     let root = self::workspace_root(&workspace_root)?;
     let memo = ensure_memo(&root)?;
@@ -351,13 +332,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .manage(preferences::WindowCache::default())
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::CloseRequested { .. }) { preferences::track(window); }
+        })
         .invoke_handler(tauri::generate_handler![
             open_workspace,
             save_workspace_snapshot,
             migrate_workspace,
-            load_ui_preferences,
             save_ui_preferences,
+            load_workspace_preferences,
+            restore_editor_preferences,
+            recent_workspaces,
             summary::summarize_flow,
             open_codex,
             open_code

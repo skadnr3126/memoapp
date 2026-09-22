@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   canvas: vi.fn<(props: ComponentProps<typeof FlowCanvas>) => null>(() => null),
 }));
 vi.mock("@tauri-apps/api/event", () => ({ emitTo: mocks.emit, listen: vi.fn(async (name, handler) => { mocks.handlers.set(name, handler); return () => mocks.handlers.delete(name); }) }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command) => command === "load_ui_preferences" ? { workspaceRoot: "D:/notes" } : undefined) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command) => command === "recent_workspaces" ? ["D:/notes"] : {}) }));
 vi.mock("@tauri-apps/api/webviewWindow", () => ({ WebviewWindow: { getByLabel: vi.fn(async () => ({})) } }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ onCloseRequested: async () => () => {} }) }));
 vi.mock("./storage/repository", async importOriginal => ({ ...await importOriginal<object>(), isDesktopRuntime: () => true, openNativeWorkspace: mocks.open, chooseNativeWorkspace: vi.fn().mockResolvedValue("D:/other"), saveNativeWorkspace: vi.fn().mockResolvedValue(undefined) }));
@@ -34,6 +34,7 @@ beforeEach(async () => {
   mocks.open.mockResolvedValue({ workspaceRoot: "D:/notes", workspace: second.workspace, nodePositionsByFlow: {} });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<App />));
+  await act(async () => (Array.from(host.querySelectorAll("button")).find(b => b.textContent === "D:/notes")!).click());
   await receive(EDITOR_READY);
   await open(a);
   mocks.emit.mockClear();
