@@ -35,6 +35,7 @@ import { clampSidebarWidth } from "./sidebarWidth";
 import "./App.css";
 import { FlowSummary } from "./components/FlowSummary";
 import { flowSummaryInput, flushEditor } from "./flowSummary";
+import { BLOCK_CLIPBOARD_TYPE, parseCopiedBlock, serializeCopiedBlock } from "./blockClipboard";
 
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => createWorkspace());
@@ -68,6 +69,7 @@ function App() {
   const issuedEditorSessionsRef = useRef(new Map<string, string>());
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
+  const undoRef = useRef<{ workspace: WorkspaceState; positions: NodePositionsByFlow } | undefined>(undefined);
 
   const latestRef = useRef({ workspace, nodePositionsByFlow, workspaceRoot });
   latestRef.current = { workspace, nodePositionsByFlow, workspaceRoot };
@@ -421,6 +423,7 @@ function App() {
       const result = operation(workspaceRef.current);
       const errors = validateWorkspace(result.workspace);
       if (errors.length) throw new Error(errors.join(" "));
+      undoRef.current = { workspace: workspaceRef.current, positions: latestRef.current.nodePositionsByFlow };
       workspaceRef.current = result.workspace;
       setWorkspace(result.workspace);
       setMessage(`${label} 완료`);
@@ -505,10 +508,57 @@ function App() {
     setSelectedBlockIds([]);
   };
 
+  const pasteBlock = (title: string, markdown: string) => {
+    if (!activeFlow || connection.kind !== "idle") return;
+    const created = runCommand("블록 붙여넣기", (current) => {
+      const result = createBlock(current, activeFlow.id);
+      return { ...updateBlock(result.workspace, result.blockId, { title, markdown }), blockId: result.blockId };
+    });
+    if (!created) return;
+    const positions = activeFlow.blockIds.map((id, index) => nodePositionsByFlow[activeFlow.id]?.[id] ?? defaultPosition(index));
+    const selected = selectedBlockIds.length === 1 ? activeFlow.blockIds.indexOf(selectedBlockIds[0]) : -1;
+    const preferred = selected >= 0 ? { x: positions[selected].x + (positions[selected].width ?? NODE_WIDTH) + 48, y: positions[selected].y } : defaultPosition(activeFlow.blockIds.length);
+    setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], [created.blockId]: findFreePosition(positions, preferred) } }));
+    setSelectedBlockIds([created.blockId]); setSelectedLinkId(undefined);
+  };
+
+  useEffect(() => {
+    const editingText = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+    const copy = (event: ClipboardEvent) => {
+      if (editingText(event.target) || selectedBlockIds.length !== 1 || !event.clipboardData) return false;
+      const block = workspace.blocks.get(selectedBlockIds[0]);
+      if (!block) return false;
+      event.clipboardData.setData(BLOCK_CLIPBOARD_TYPE, serializeCopiedBlock(block));
+      event.clipboardData.setData("text/plain", block.markdown || block.title || "");
+      event.preventDefault();
+      return true;
+    };
+    const onCopy = (event: ClipboardEvent) => { copy(event); };
+    const onCut = (event: ClipboardEvent) => {
+      const blockId = selectedBlockIds[0];
+      if (blockId && copy(event)) deleteSelectedBlock(blockId);
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      if (editingText(event.target) || !event.clipboardData) return;
+      const block = parseCopiedBlock(event.clipboardData.getData(BLOCK_CLIPBOARD_TYPE));
+      if (!block) return;
+      event.preventDefault(); pasteBlock(block.title, block.markdown);
+    };
+    window.addEventListener("copy", onCopy); window.addEventListener("cut", onCut); window.addEventListener("paste", onPaste);
+    return () => { window.removeEventListener("copy", onCopy); window.removeEventListener("cut", onCut); window.removeEventListener("paste", onPaste); };
+  }, [workspace, activeFlow, selectedBlockIds, nodePositionsByFlow, connection]);
+
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (transitioningRef.current || event.repeat || event.isComposing || !activeFlow || storageState === "loading" || storageState === "needs-workspace") return;
       if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "z" && undoRef.current) {
+        event.preventDefault();
+        const previous = undoRef.current; undoRef.current = undefined;
+        workspaceRef.current = previous.workspace; setWorkspace(previous.workspace); setNodePositionsByFlow(previous.positions);
+        setSelectedBlockIds([]); setSelectedLinkId(undefined); setConnection({ kind: "idle" }); setMessage("실행 취소 완료");
+        return;
+      }
       if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "d") { event.preventDefault(); beginConnection(); return; }
       if (connection.kind !== "idle") {
         if (event.key === "Escape") { event.preventDefault(); setConnection({ kind: "idle" }); }

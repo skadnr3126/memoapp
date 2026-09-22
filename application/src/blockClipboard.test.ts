@@ -1,0 +1,11 @@
+import { describe, expect, it } from "vitest";
+import { parseCopiedBlock, serializeCopiedBlock } from "./blockClipboard";
+
+describe("block clipboard", () => {
+  it("round-trips blocks and rejects ordinary or malformed text", () => {
+    const block = { id: "b", title: "제목", markdown: "# 내용", createdAt: "", updatedAt: "" };
+    expect(parseCopiedBlock(serializeCopiedBlock(block))).toEqual({ title: "제목", markdown: "# 내용" });
+    expect(parseCopiedBlock("일반 텍스트")).toBeUndefined();
+    expect(parseCopiedBlock('{"version":1,"title":3}')).toBeUndefined();
+  });
+});
