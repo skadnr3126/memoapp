@@ -9,12 +9,12 @@ import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_LOCK, EDITOR_LOCKED, EDITOR_READY, ED
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (event: { payload: any }) => void>(),
-  emit: vi.fn().mockResolvedValue(undefined), open: vi.fn(), focus: vi.fn().mockResolvedValue(undefined),
+  emit: vi.fn().mockResolvedValue(undefined), open: vi.fn(),
   canvas: vi.fn<(props: ComponentProps<typeof FlowCanvas>) => null>(() => null),
 }));
 vi.mock("@tauri-apps/api/event", () => ({ emitTo: mocks.emit, listen: vi.fn(async (name, handler) => { mocks.handlers.set(name, handler); return () => mocks.handlers.delete(name); }) }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command) => command === "recent_workspaces" ? ["D:/notes"] : {}) }));
-vi.mock("@tauri-apps/api/webviewWindow", () => ({ WebviewWindow: { getByLabel: vi.fn(async () => ({ setFocus: mocks.focus })) } }));
+vi.mock("@tauri-apps/api/webviewWindow", () => ({ WebviewWindow: { getByLabel: vi.fn(async () => ({})) } }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ onCloseRequested: async () => () => {} }) }));
 vi.mock("./storage/repository", async importOriginal => ({ ...await importOriginal<object>(), isDesktopRuntime: () => true, openNativeWorkspace: mocks.open, chooseNativeWorkspace: vi.fn().mockResolvedValue("D:/other"), saveNativeWorkspace: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("./components/FlowCanvas", () => ({ FlowCanvas: mocks.canvas }));
@@ -25,9 +25,9 @@ const canvas = () => last(mocks.canvas.mock.calls)[0];
 const loads = () => mocks.emit.mock.calls.filter(call => call[1] === EDITOR_LOAD);
 const session = () => last(loads())[2] as EditorSession;
 const receive = async (name: string, payload?: unknown) => { await act(async () => mocks.handlers.get(name)!({ payload })); };
-const open = async (id: string) => { await act(async () => { canvas().onOpenBlock(id); await Promise.resolve(); await Promise.resolve(); }); };
+const open = async (id: string) => { await act(async () => canvas().onOpenBlock(id)); };
 beforeEach(async () => {
-  vi.useFakeTimers(); mocks.handlers.clear(); mocks.emit.mockClear(); mocks.canvas.mockClear(); mocks.focus.mockClear();
+  vi.useFakeTimers(); mocks.handlers.clear(); mocks.emit.mockClear(); mocks.canvas.mockClear();
   const flow = createFlow(createWorkspace());
   const first = createBlock(flow.workspace, flow.flowId); a = first.blockId;
   const second = createBlock(first.workspace, flow.flowId); b = second.blockId;
@@ -66,32 +66,6 @@ it("pins the editor while selection, creation, deletion and saving continue; unl
   const other = [...canvas().workspace.blocks.keys()].find(id => id !== a)!;
   await open(other);
   expect(session().blockId).toBe(other);
-});
-
-it("brings the editor window forward when the current block is opened again", async () => {
-  const current = session();
-  mocks.focus.mockClear(); mocks.emit.mockClear();
-  await open(current.blockId);
-  expect(mocks.emit).toHaveBeenCalledWith("editor", EDITOR_LOAD, current);
-  expect(mocks.focus).toHaveBeenCalledOnce();
-});
-
-it("keeps content delivery working when focus fails and displays the failure", async () => {
-  mocks.focus.mockRejectedValueOnce("window.set_focus not allowed");
-  await open(b);
-  expect(session().blockId).toBe(b);
-  const status = host.querySelector('[role="status"]')!;
-  expect(status.textContent).toContain("window.set_focus not allowed");
-  expect(status.classList.contains("visually-hidden")).toBe(false);
-});
-
-it("loads a newly selected block before bringing the editor forward", async () => {
-  mocks.emit.mockClear(); mocks.focus.mockClear();
-  await open(b);
-  expect(mocks.emit).toHaveBeenCalledWith("editor", EDITOR_LOAD, expect.objectContaining({ blockId: b }));
-  const emitOrder = mocks.emit.mock.invocationCallOrder;
-  const focusOrder = mocks.focus.mock.invocationCallOrder;
-  expect(emitOrder[emitOrder.length - 1]).toBeLessThan(focusOrder[focusOrder.length - 1]);
 });
 
 it("unlocks and clears when the pinned block is deleted and rejects its late lock request", async () => {

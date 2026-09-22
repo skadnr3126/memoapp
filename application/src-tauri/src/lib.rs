@@ -345,7 +345,6 @@ pub fn run() {
             restore_editor_preferences,
             recent_workspaces,
             summary::has_openrouter_api_key,
-            summary::delete_openrouter_api_key,
             summary::save_openrouter_api_key,
             summary::summarize_flow,
             open_codex,

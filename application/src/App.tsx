@@ -439,7 +439,8 @@ function App() {
     if (!block) return;
     setSelectedBlockIds([blockId]);
     if (editorLockedRef.current) return;
-    const session: EditorSession = editorSessionRef.current?.blockId === blockId ? editorSessionRef.current : {
+    if (editorSessionRef.current?.blockId === blockId) return;
+    const session: EditorSession = {
       sessionId: crypto.randomUUID(), workspaceSession: workspaceSessionRef.current,
       blockId: block.id,
       title: block.title ?? "",
@@ -449,13 +450,10 @@ function App() {
     editorSessionRef.current = session;
     issuedEditorSessionsRef.current.set(session.sessionId, blockId);
     void ensureEditorWindow()
-      .then(async () => {
-        if (editorSessionRef.current?.sessionId === session.sessionId && workspaceSessionRef.current === session.workspaceSession && workspaceRef.current.blocks.has(blockId)) {
-          await sendEditorSession(session);
-          await (await WebviewWindow.getByLabel("editor"))?.setFocus();
-        }
+      .then(() => {
+        if (editorSessionRef.current?.sessionId === session.sessionId && workspaceSessionRef.current === session.workspaceSession && workspaceRef.current.blocks.has(blockId)) return sendEditorSession(session);
       })
-      .catch((error) => setMessage(`편집 창 열기 실패: ${String(error)}`));
+      .catch((error) => setMessage(error instanceof Error ? error.message : "편집 창을 열지 못했습니다."));
   };
 
   const addBlock = (position?: { x: number; y: number }) => {
@@ -676,7 +674,7 @@ function App() {
             </header>
         {activeFlow ? (
           <>
-            <div className="workspace-status" role="status">{message}</div>
+            <div className="visually-hidden" role="status">{message}</div>
             {storageError && <div className="storage-error" role="alert">{storageError} <button className="storage-retry" type="button" onClick={() => void retrySave()}>다시 시도</button></div>}
             <div className="flow-work-area">
               <FlowCanvas key={activeFlow.id}
