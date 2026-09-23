@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { marked } from "marked";
 import { documentExtensions, requiresSource } from "./markdownConfig";
 
 type Props = { markdown: string; title?: string; onChange: (markdown: string) => void; toolbar?: ReactNode };
@@ -25,7 +26,10 @@ export function MarkdownDocument({ markdown, title = "", onChange, toolbar }: Pr
         const text = event.clipboardData?.getData("text/plain");
         if (!text || !editor || editor.isActive("codeBlock")) return false;
         event.preventDefault();
-        if (requiresSource(text)) editor.commands.insertContent({ type: "text", text });
+        const tokens = marked.lexer(text);
+        if (requiresSource(text) || (tokens.length === 1 && tokens[0].type === "paragraph" && tokens[0].tokens?.every(token => token.type === "text"))) {
+          editor.commands.insertContent({ type: "text", text });
+        }
         else editor.commands.insertContent(text, { contentType: "markdown" });
         return true;
       },
@@ -69,7 +73,12 @@ export function MarkdownDocument({ markdown, title = "", onChange, toolbar }: Pr
     {source ? <textarea className="scription-source" aria-label="Scription 마크다운 원문" value={markdown}
       onChange={event => onChange(event.currentTarget.value)} spellCheck={false}
       placeholder="생각을 자세히 적어보세요…" /> :
-      <div className="scription-page" onClick={event => { if (event.target === event.currentTarget) editor?.commands.focus("end"); }}>
+      <div className="scription-page" onClick={event => {
+        if (event.target !== event.currentTarget || !editor) return;
+        const rect = editor.view.dom.getBoundingClientRect();
+        const position = editor.view.posAtCoords({ left: Math.max(rect.left, Math.min(event.clientX, rect.right)), top: Math.max(rect.top, Math.min(event.clientY, rect.bottom)) });
+        editor.chain().focus().setTextSelection(position?.pos ?? editor.state.doc.content.size).run();
+      }}>
         <EditorContent editor={editor} />
         {editor?.isEmpty && <span className="scription-placeholder">생각을 자세히 적어보세요…</span>}
       </div>}

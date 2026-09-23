@@ -208,3 +208,20 @@ it("pastes markdown into formatted content and continues and exits a list with E
   expect(host.querySelectorAll("li")).toHaveLength(1);
   expect(editor.isActive("bulletList")).toBe(false);
 });
+
+it("keeps plain text paste in the current line and places the caret by a page click", () => {
+  load("plain", "first line\n\nlast line");
+  const editor = documentEditor();
+  act(() => editor.commands.setTextSelection(6));
+  act(() => {
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { getData: (type: string) => type === "text/plain" ? " added" : "", files: [] } });
+    editor.view.dom.dispatchEvent(paste);
+  });
+  expect(editor.getText()).toBe("first added line\n\nlast line");
+  const posAtCoords = vi.spyOn(editor.view, "posAtCoords").mockReturnValue({ pos: 2, inside: 1 });
+  const page = host.querySelector<HTMLElement>(".scription-page")!;
+  act(() => page.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 20, clientY: 20 })));
+  expect(posAtCoords).toHaveBeenCalled();
+  expect(editor.state.selection.from).toBe(2);
+});
