@@ -20,7 +20,7 @@ import { ConnectionState, startConnection, chooseConnectionBlock } from "./domai
 import { defaultPosition, findFreePosition, NODE_WIDTH } from "./domain/layout";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
-import { FlowCanvas, type NodePosition } from "./components/FlowCanvas";
+import { FlowCanvas, centerNodeAt, type NodePosition } from "./components/FlowCanvas";
 import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED, type EditorSaveRequest, type EditorSession } from "./editorProtocol";
 import { EDITOR_LOCK, EDITOR_LOCKED, type EditorLockState } from "./editorProtocol";
 import { Sidebar } from "./components/Sidebar";
@@ -35,7 +35,7 @@ import { clampSidebarWidth } from "./sidebarWidth";
 import "./App.css";
 import { FlowSummary } from "./components/FlowSummary";
 import { flowSummaryInput, flushEditor } from "./flowSummary";
-import { BLOCK_CLIPBOARD_TYPE, parseCopiedBlock, serializeCopiedBlock } from "./blockClipboard";
+import { BLOCK_CLIPBOARD_TYPE, parseCopiedBlock, serializeCopiedBlock, type CopiedBlock } from "./blockClipboard";
 
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => createWorkspace());
@@ -516,17 +516,18 @@ function App() {
     setSelectedBlockIds([]);
   };
 
-  const pasteBlock = (title: string, markdown: string) => {
+  const pasteBlock = (block: CopiedBlock) => {
     if (!activeFlow || connection.kind !== "idle") return;
     const created = runCommand("블록 붙여넣기", (current) => {
       const result = createBlock(current, activeFlow.id);
-      return { ...updateBlock(result.workspace, result.blockId, { title, markdown }), blockId: result.blockId };
+      return { ...updateBlock(result.workspace, result.blockId, { title: block.title, markdown: block.markdown }), blockId: result.blockId };
     });
     if (!created) return;
     const positions = activeFlow.blockIds.map((id, index) => nodePositionsByFlow[activeFlow.id]?.[id] ?? defaultPosition(index));
     const selected = selectedBlockIds.length === 1 ? activeFlow.blockIds.indexOf(selectedBlockIds[0]) : -1;
     const preferred = selected >= 0 ? { x: positions[selected].x + (positions[selected].width ?? NODE_WIDTH) + 48, y: positions[selected].y } : defaultPosition(activeFlow.blockIds.length);
-    const point = pointerBlockPositionRef.current ?? findFreePosition(positions, preferred);
+    const pointer = pointerBlockPositionRef.current;
+    const point = pointer ? { ...centerNodeAt({ ...pointer, width: block.width, height: block.height }), width: block.width, height: block.height } : findFreePosition(positions, { ...preferred, width: block.width, height: block.height });
     setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], [created.blockId]: point } }));
     setSelectedBlockIds([created.blockId]); setSelectedLinkId(undefined);
   };
@@ -537,7 +538,7 @@ function App() {
       if (editingText(event.target) || selectedBlockIds.length !== 1 || !event.clipboardData) return false;
       const block = workspace.blocks.get(selectedBlockIds[0]);
       if (!block) return false;
-      event.clipboardData.setData(BLOCK_CLIPBOARD_TYPE, serializeCopiedBlock(block));
+      event.clipboardData.setData(BLOCK_CLIPBOARD_TYPE, serializeCopiedBlock(block, activeFlow ? nodePositionsByFlow[activeFlow.id]?.[block.id] : undefined));
       event.clipboardData.setData("text/plain", block.markdown || block.title || "");
       event.preventDefault();
       return true;
@@ -551,7 +552,7 @@ function App() {
       if (editingText(event.target) || !event.clipboardData) return;
       const block = parseCopiedBlock(event.clipboardData.getData(BLOCK_CLIPBOARD_TYPE));
       if (!block) return;
-      event.preventDefault(); pasteBlock(block.title, block.markdown);
+      event.preventDefault(); pasteBlock(block);
     };
     window.addEventListener("copy", onCopy); window.addEventListener("cut", onCut); window.addEventListener("paste", onPaste);
     return () => { window.removeEventListener("copy", onCopy); window.removeEventListener("cut", onCut); window.removeEventListener("paste", onPaste); };

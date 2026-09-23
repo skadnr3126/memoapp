@@ -36,7 +36,7 @@ export const getAutoScrollDelta = (pointer: number, start: number, end: number, 
 
 export const clampScroll = (position: number, maximum: number) => Math.max(0, Math.min(maximum, position));
 
-export const centerNodeAt = ({ x, y }: NodePosition): NodePosition => ({ x: x - NODE_WIDTH / 2, y: y - NODE_HEIGHT / 2 });
+export const centerNodeAt = ({ x, y, width, height }: NodePosition): NodePosition => ({ x: x - (width ?? NODE_WIDTH) / 2, y: y - (height ?? NODE_HEIGHT) / 2 });
 
 /** Finds the most natural neighboring node in the requested direction. */
 export const findDirectionalNeighbor = (
@@ -294,7 +294,7 @@ export function FlowCanvas({
   };
   return (
     <div className="flow-canvas-scroll" ref={viewportRef} onContextMenu={(e) => e.preventDefault()}
-      onPointerEnter={(e) => { mouseRef.current = { x: e.clientX, y: e.clientY }; onPointerBlockPositionChange?.(pointerBlockPosition(e.clientX, e.clientY)); }}
+      onPointerEnter={(e) => { mouseRef.current = { x: e.clientX, y: e.clientY }; onPointerBlockPositionChange?.(worldPosition(e.clientX, e.clientY)); }}
       onPointerLeave={() => { mouseRef.current = undefined; onPointerBlockPositionChange?.(); }}
       onScroll={() => setMenu(undefined)}
       onPointerDown={(e) => {
@@ -307,7 +307,7 @@ export function FlowCanvas({
         panDragRef.current = { startX: e.clientX, startY: e.clientY, scrollLeft: e.currentTarget.scrollLeft, scrollTop: e.currentTarget.scrollTop, moved: false, blockId, linkId };
       }}
       onPointerMove={(e) => {
-        mouseRef.current = { x: e.clientX, y: e.clientY }; onPointerBlockPositionChange?.(pointerBlockPosition(e.clientX, e.clientY));
+        mouseRef.current = { x: e.clientX, y: e.clientY }; onPointerBlockPositionChange?.(worldPosition(e.clientX, e.clientY));
         const drag = panDragRef.current;
         if (!drag) return;
         if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 5) drag.moved = true;

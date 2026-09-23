@@ -4,6 +4,7 @@ import { boundsOverlap, centerNodeAt, clampScroll, findDirectionalNeighbor, getA
 describe("centerNodeAt", () => {
   it("places the default node center at the pointer", () => {
     expect(centerNodeAt({ x: 500, y: 300 })).toEqual({ x: 340, y: 228 });
+    expect(centerNodeAt({ x: 500, y: 300, width: 480, height: 220 })).toEqual({ x: 260, y: 190 });
   });
 });
 
