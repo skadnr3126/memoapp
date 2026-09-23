@@ -20,7 +20,7 @@ it("resizes all four corners, preserves the opposite corner, and clamps minimum 
 it("round-trips cleared titles, whitespace and resized geometry without reintroducing defaults", () => {
   const flow = createFlow(createWorkspace());
   const block = createBlock(flow.workspace, flow.flowId);
-  expect(block.workspace.blocks.get(block.blockId)?.title).toBeTruthy();
+  expect(block.workspace.blocks.get(block.blockId)?.title).toBe("");
   for (const title of ["", " two words "]) {
     const workspace = updateBlock(renameFlow(block.workspace, flow.flowId, title).workspace, block.blockId, { title, markdown: "" }).workspace;
     const geometry = { x: -20, y: 80, width: 540, height: 270 };

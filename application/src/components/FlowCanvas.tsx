@@ -194,6 +194,7 @@ export function FlowCanvas({
       if (Object.keys(changed).length) onNodePositionsChange(changed);
     };
     fit();
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(fit);
     observer.observe(canvas);
     return () => observer.disconnect();

@@ -4,6 +4,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   BlockId,
   CommandResult,
+  Flow,
   WorkspaceState,
   createBlock,
   connectBlocks,
@@ -21,8 +22,11 @@ import { defaultPosition, findFreePosition, NODE_WIDTH } from "./domain/layout";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { FlowCanvas, centerNodeAt, type NodePosition } from "./components/FlowCanvas";
-import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED, type EditorSaveRequest, type EditorSession } from "./editorProtocol";
-import { EDITOR_LOCK, EDITOR_LOCKED, type EditorLockState } from "./editorProtocol";
+import {
+  EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED,
+  EDITOR_LOCK, EDITOR_LOCKED,
+  type EditorSaveRequest, type EditorSession, type EditorLockState,
+} from "./editorProtocol";
 import { Sidebar } from "./components/Sidebar";
 import {
   NodePositionsByFlow,
@@ -197,7 +201,6 @@ function App() {
       savedStateRef.current = { workspace: loaded.workspace, positions: loaded.nodePositionsByFlow };
       setWorkspace(loaded.workspace);
       setNodePositionsByFlow(loaded.nodePositionsByFlow);
-      setSelectedBlockIds([]);
       setWorkspaceRoot(loaded.workspaceRoot);
       setMessage(loaded.recoveryNotice ?? "작업공간을 열었습니다.");
       setStorageState("ready");
@@ -218,7 +221,6 @@ function App() {
     try {
       const selected = await chooseNativeWorkspace();
       if (!selected) return;
-    
       await openWorkspace(selected);
     } catch (error) {
       setStorageError(error instanceof Error ? error.message : "폴더 선택 창을 열 수 없습니다.");
@@ -464,13 +466,17 @@ function App() {
       .catch((error) => setMessage(error instanceof Error ? error.message : "편집 창을 열지 못했습니다."));
   };
 
+  const newBlockPlacement = (flow: Flow) => {
+    const positions = flow.blockIds.map((id, index) => nodePositionsByFlow[flow.id]?.[id] ?? defaultPosition(index));
+    const selected = selectedBlockIds.length === 1 ? flow.blockIds.indexOf(selectedBlockIds[0]) : -1;
+    const preferred = selected >= 0 ? { x: positions[selected].x + (positions[selected].width ?? NODE_WIDTH) + 48, y: positions[selected].y } : defaultPosition(flow.blockIds.length);
+    return { positions, preferred };
+  };
   const addBlock = (position?: { x: number; y: number }) => {
     if (!activeFlow || connection.kind !== "idle") return;
     const result = runCommand("블록 추가", (current) => createBlock(current, activeFlow.id));
     if (!result) return;
-    const positions = activeFlow.blockIds.map((id, index) => nodePositionsByFlow[activeFlow.id]?.[id] ?? defaultPosition(index));
-    const selected = selectedBlockIds.length === 1 ? activeFlow.blockIds.indexOf(selectedBlockIds[0]) : -1;
-    const preferred = selected >= 0 ? { x: positions[selected].x + (positions[selected].width ?? NODE_WIDTH) + 48, y: positions[selected].y } : defaultPosition(activeFlow.blockIds.length);
+    const { positions, preferred } = newBlockPlacement(activeFlow);
     const point = position ?? findFreePosition(positions, preferred);
     setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], [result.blockId]: point } }));
     setSelectedBlockIds([result.blockId]); setSelectedLinkId(undefined);
@@ -523,9 +529,7 @@ function App() {
       return { ...updateBlock(result.workspace, result.blockId, { title: block.title, markdown: block.markdown }), blockId: result.blockId };
     });
     if (!created) return;
-    const positions = activeFlow.blockIds.map((id, index) => nodePositionsByFlow[activeFlow.id]?.[id] ?? defaultPosition(index));
-    const selected = selectedBlockIds.length === 1 ? activeFlow.blockIds.indexOf(selectedBlockIds[0]) : -1;
-    const preferred = selected >= 0 ? { x: positions[selected].x + (positions[selected].width ?? NODE_WIDTH) + 48, y: positions[selected].y } : defaultPosition(activeFlow.blockIds.length);
+    const { positions, preferred } = newBlockPlacement(activeFlow);
     const pointer = pointerBlockPositionRef.current;
     const point = pointer ? { ...centerNodeAt({ ...pointer, width: block.width, height: block.height }), width: block.width, height: block.height } : findFreePosition(positions, { ...preferred, width: block.width, height: block.height });
     setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], [created.blockId]: point } }));
@@ -639,7 +643,6 @@ function App() {
           const flow = workspace.flows.get(flowId);
           setWorkspace({ ...workspace, activeFlowId: flowId });
           resetInteraction();
-          setSelectedBlockIds([]);
           setMessage(`${flow?.title ?? "Flow"} 열기`);
         }}
         onDeleteFlow={deleteSelectedFlow}

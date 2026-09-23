@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isDesktopRuntime } from "./storage/repository";
-import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED, type EditorSaveResult, type EditorSaveRequest, type EditorSession } from "./editorProtocol";
+import {
+  EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED,
+  EDITOR_FLUSH, EDITOR_FLUSHED, EDITOR_LOCK, EDITOR_LOCKED,
+  type EditorSaveResult, type EditorSaveRequest, type EditorSession, type EditorLockState,
+} from "./editorProtocol";
 import "./EditorWindow.css";
 import { MarkdownDocument } from "./components/MarkdownDocument";
-import { EDITOR_FLUSH, EDITOR_FLUSHED } from "./editorProtocol";
-import { EDITOR_LOCK, EDITOR_LOCKED, type EditorLockState } from "./editorProtocol";
 
 export function EditorWindow() {
   const [session, setSession] = useState<EditorSession>();

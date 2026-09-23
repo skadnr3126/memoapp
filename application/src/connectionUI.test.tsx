@@ -14,6 +14,8 @@ const preview = () => host.querySelector(".link-preview");
 const beginLink = () => key(window, "d", { ctrlKey: true });
 const finishLink = () => key(window, "Enter");
 beforeEach(async () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(2000);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(2000);
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   await act(async () => { root.render(<App />); });
   await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true})); });
@@ -82,13 +84,15 @@ describe("summary editing", () => {
   });
   it("starts dragging from the summary text without entering editing", () => {
     const node = nodes()[0];
+    const startX = parseFloat(node.parentElement!.style.left);
+    const startY = parseFloat(node.parentElement!.style.top);
     node.setPointerCapture = vi.fn();
     node.hasPointerCapture = vi.fn(() => false);
     pointer(node.querySelector(".node-summary-text")!, "pointerdown", 100, 100, 0);
     pointer(node, "pointermove", 140, 120, 0);
     pointer(node, "pointerup", 140, 120, 0);
-    expect(node.parentElement!.style.left).toBe("140px");
-    expect(node.parentElement!.style.top).toBe("120px");
+    expect(parseFloat(node.parentElement!.style.left)).toBe(startX + 40);
+    expect(parseFloat(node.parentElement!.style.top)).toBe(startY + 20);
     expect(host.querySelector(".node-summary-input")).toBeNull();
   });
 });
@@ -154,7 +158,7 @@ describe("node creation gestures", () => {
     key(window, "t", { ctrlKey: true });
     expect(nodes()).toHaveLength(4);
     const node = host.querySelectorAll<HTMLElement>(".graph-node-wrap")[3];
-    expect(node.style.left).toBe("400px"); expect(node.style.top).toBe("250px");
+    expect(node.style.left).toBe("240px"); expect(node.style.top).toBe("178px");
     key(window, "t", { ctrlKey: true, repeat: true });
     key(host.querySelector("input")!, "t", { ctrlKey: true });
     expect(nodes()).toHaveLength(4);
@@ -166,7 +170,7 @@ describe("node creation gestures", () => {
     expect(host.querySelector('[role="menu"]')).not.toBeNull();
     click(host.querySelector('[role="menuitem"]')!);
     expect(nodes()).toHaveLength(4);
-    expect(host.querySelectorAll<HTMLElement>(".graph-node-wrap")[3].style.left).toBe("400px");
+    expect(host.querySelectorAll<HTMLElement>(".graph-node-wrap")[3].style.left).toBe("240px");
     expect(host.querySelector('[role="menu"]')).toBeNull();
   });
   it("never opens a menu after a drag returning to its starting point or a cancellation", () => {
