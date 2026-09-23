@@ -12,6 +12,7 @@ export function MarkdownDocument({ markdown, title = "", onChange, toolbar }: Pr
   const [source, setSource] = useState(() => requiresSource(markdown));
   const [help, setHelp] = useState(false);
   const onChangeRef = useRef(onChange);
+  const pageMouseDownRef = useRef(false);
   const renderedMarkdownRef = useRef(markdown);
   onChangeRef.current = onChange;
   const unsupported = useMemo(() => requiresSource(markdown), [markdown]);
@@ -73,8 +74,8 @@ export function MarkdownDocument({ markdown, title = "", onChange, toolbar }: Pr
     {source ? <textarea className="scription-source" aria-label="Scription 마크다운 원문" value={markdown}
       onChange={event => onChange(event.currentTarget.value)} spellCheck={false}
       placeholder="생각을 자세히 적어보세요…" /> :
-      <div className="scription-page" onClick={event => {
-        if (event.target !== event.currentTarget || !editor) return;
+      <div className="scription-page" onMouseDown={event => { pageMouseDownRef.current = event.target === event.currentTarget; }} onClick={event => {
+        if (event.target !== event.currentTarget || !pageMouseDownRef.current || !editor) return;
         const rect = editor.view.dom.getBoundingClientRect();
         const position = editor.view.posAtCoords({ left: Math.max(rect.left, Math.min(event.clientX, rect.right)), top: Math.max(rect.top, Math.min(event.clientY, rect.bottom)) });
         editor.chain().focus().setTextSelection(position?.pos ?? editor.state.doc.content.size).run();

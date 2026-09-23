@@ -221,7 +221,19 @@ it("keeps plain text paste in the current line and places the caret by a page cl
   expect(editor.getText()).toBe("first added line\n\nlast line");
   const posAtCoords = vi.spyOn(editor.view, "posAtCoords").mockReturnValue({ pos: 2, inside: 1 });
   const page = host.querySelector<HTMLElement>(".scription-page")!;
-  act(() => page.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 20, clientY: 20 })));
+  act(() => {
+    page.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: 20, clientY: 20 }));
+    page.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 20, clientY: 20 }));
+  });
   expect(posAtCoords).toHaveBeenCalled();
   expect(editor.state.selection.from).toBe(2);
+  act(() => editor.commands.setTextSelection({ from: 2, to: 6 }));
+  act(() => {
+    editor.view.dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: 20, clientY: 20 }));
+    posAtCoords.mockClear();
+    page.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 40, clientY: 40 }));
+  });
+  expect(editor.state.selection.from).toBe(2);
+  expect(editor.state.selection.to).toBe(6);
+  expect(posAtCoords).not.toHaveBeenCalled();
 });
