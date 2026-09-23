@@ -20,7 +20,7 @@ import { ConnectionState, startConnection, chooseConnectionBlock } from "./domai
 import { defaultPosition, findFreePosition, NODE_WIDTH } from "./domain/layout";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
-import { FlowCanvas } from "./components/FlowCanvas";
+import { FlowCanvas, type NodePosition } from "./components/FlowCanvas";
 import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED, type EditorSaveRequest, type EditorSession } from "./editorProtocol";
 import { EDITOR_LOCK, EDITOR_LOCKED, type EditorLockState } from "./editorProtocol";
 import { Sidebar } from "./components/Sidebar";
@@ -67,6 +67,7 @@ function App() {
   const editorSessionRef = useRef<EditorSession | undefined>(undefined);
   const editorLockedRef = useRef(false);
   const issuedEditorSessionsRef = useRef(new Map<string, string>());
+  const pointerBlockPositionRef = useRef<NodePosition | undefined>(undefined);
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
   const undoRef = useRef<{ workspace: WorkspaceState; positions: NodePositionsByFlow } | undefined>(undefined);
@@ -434,12 +435,16 @@ function App() {
     }
   };
 
-  const openBlockEditor = (blockId: BlockId, source = workspace) => {
+  const openBlockEditor = (blockId: BlockId, focus = false) => {
+    const source = workspace;
     const block = source.blocks.get(blockId);
     if (!block) return;
     setSelectedBlockIds([blockId]);
-    if (editorLockedRef.current) return;
-    if (editorSessionRef.current?.blockId === blockId) return;
+    const focusEditor = () => WebviewWindow.getByLabel("editor").then((editor) => editor?.setFocus());
+    if (editorLockedRef.current || editorSessionRef.current?.blockId === blockId) {
+      if (focus) void focusEditor().catch(() => setMessage("에디터 창에 포커스하지 못했습니다."));
+      return;
+    }
     const session: EditorSession = {
       sessionId: crypto.randomUUID(), workspaceSession: workspaceSessionRef.current,
       blockId: block.id,
@@ -450,8 +455,11 @@ function App() {
     editorSessionRef.current = session;
     issuedEditorSessionsRef.current.set(session.sessionId, blockId);
     void ensureEditorWindow()
-      .then(() => {
-        if (editorSessionRef.current?.sessionId === session.sessionId && workspaceSessionRef.current === session.workspaceSession && workspaceRef.current.blocks.has(blockId)) return sendEditorSession(session);
+      .then(async () => {
+        if (editorSessionRef.current?.sessionId === session.sessionId && workspaceSessionRef.current === session.workspaceSession && workspaceRef.current.blocks.has(blockId)) {
+          await sendEditorSession(session);
+          if (focus) await focusEditor();
+        }
       })
       .catch((error) => setMessage(error instanceof Error ? error.message : "편집 창을 열지 못했습니다."));
   };
@@ -518,7 +526,8 @@ function App() {
     const positions = activeFlow.blockIds.map((id, index) => nodePositionsByFlow[activeFlow.id]?.[id] ?? defaultPosition(index));
     const selected = selectedBlockIds.length === 1 ? activeFlow.blockIds.indexOf(selectedBlockIds[0]) : -1;
     const preferred = selected >= 0 ? { x: positions[selected].x + (positions[selected].width ?? NODE_WIDTH) + 48, y: positions[selected].y } : defaultPosition(activeFlow.blockIds.length);
-    setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], [created.blockId]: findFreePosition(positions, preferred) } }));
+    const point = pointerBlockPositionRef.current ?? findFreePosition(positions, preferred);
+    setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], [created.blockId]: point } }));
     setSelectedBlockIds([created.blockId]); setSelectedLinkId(undefined);
   };
 
@@ -679,6 +688,7 @@ function App() {
             <div className="flow-work-area">
               <FlowCanvas key={activeFlow.id}
                 onCreateBlock={addBlock}
+                onPointerBlockPositionChange={(position) => { pointerBlockPositionRef.current = position; }}
                 onDeleteBlock={deleteSelectedBlock}
                 onDeleteLink={deleteLink}
                 onBeginConnection={(id) => {

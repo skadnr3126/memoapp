@@ -36,6 +36,8 @@ export const getAutoScrollDelta = (pointer: number, start: number, end: number, 
 
 export const clampScroll = (position: number, maximum: number) => Math.max(0, Math.min(maximum, position));
 
+export const centerNodeAt = ({ x, y }: NodePosition): NodePosition => ({ x: x - NODE_WIDTH / 2, y: y - NODE_HEIGHT / 2 });
+
 /** Finds the most natural neighboring node in the requested direction. */
 export const findDirectionalNeighbor = (
   currentId: BlockId,
@@ -71,7 +73,7 @@ export const findDirectionalNeighbor = (
 type FlowCanvasProps = {
   workspace: WorkspaceState;
   flow: Flow;
-  onOpenBlock: (blockId: BlockId) => void;
+  onOpenBlock: (blockId: BlockId, focus?: boolean) => void;
   onRenameBlock: (blockId: BlockId, title: string) => void;
   nodePositions: Record<BlockId, NodePosition | undefined>;
   selectedBlockIds: BlockId[];
@@ -82,6 +84,7 @@ type FlowCanvasProps = {
   selectedLinkId?: string;
   onSelectLink: (id: string) => void;
   onCreateBlock?: (position: NodePosition) => void;
+  onPointerBlockPositionChange?: (position?: NodePosition) => void;
   onDeleteBlock?: (id: BlockId) => void;
   onDeleteLink?: (id: string) => void;
   onBeginConnection?: (id: BlockId) => void;
@@ -96,7 +99,7 @@ export function FlowCanvas({
   selectedBlockIds,
   onSelectedBlockIdsChange,
   onNodePositionsChange,
-  connection, onChooseConnectionBlock, selectedLinkId, onSelectLink, onCreateBlock, onDeleteBlock, onDeleteLink, onBeginConnection,
+  connection, onChooseConnectionBlock, selectedLinkId, onSelectLink, onCreateBlock, onPointerBlockPositionChange, onDeleteBlock, onDeleteLink, onBeginConnection,
 }: FlowCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -133,6 +136,7 @@ export function FlowCanvas({
     const bounds = canvasRef.current!.getBoundingClientRect();
     return { x: x - bounds.left + originRef.current.x, y: y - bounds.top + originRef.current.y };
   };
+  const pointerBlockPosition = (x: number, y: number) => centerNodeAt(worldPosition(x, y));
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMenu(undefined);
@@ -143,13 +147,13 @@ export function FlowCanvas({
       event.preventDefault();
       if (event.repeat || event.isComposing || linking || panDragRef.current || pointerDragRef.current || selectionDragRef.current) return;
       setMenu(undefined);
-      onCreateBlock?.(worldPosition(pointer.x, pointer.y));
+      onCreateBlock?.(pointerBlockPosition(pointer.x, pointer.y));
     };
     const dismiss = (event: Event) => {
       if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
       setMenu(undefined);
     };
-    const blur = () => { setMenu(undefined); mouseRef.current = undefined; panDragRef.current = undefined; viewportRef.current?.classList.remove("is-panning"); };
+    const blur = () => { setMenu(undefined); mouseRef.current = undefined; onPointerBlockPositionChange?.(); panDragRef.current = undefined; viewportRef.current?.classList.remove("is-panning"); };
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", dismiss, true);
     window.addEventListener("blur", blur);
@@ -158,7 +162,7 @@ export function FlowCanvas({
       window.removeEventListener("pointerdown", dismiss, true);
       window.removeEventListener("blur", blur);
     };
-  }, [onCreateBlock, linking]);
+  }, [onCreateBlock, onPointerBlockPositionChange, linking]);
   useEffect(() => { setMenu(undefined); setEditingId(undefined); }, [flow.id, linking]);
   useEffect(() => { if (menu?.linkId && !flow.links.has(menu.linkId)) setMenu(undefined); }, [flow.links, menu]);
   useEffect(() => { if (menu) menuRef.current?.querySelector("button")?.focus(); }, [menu]);
@@ -284,14 +288,14 @@ export function FlowCanvas({
       }
     : undefined;
 
-  const activate = (id: BlockId) => {
+  const activate = (id: BlockId, focus = false) => {
     if (linking) onChooseConnectionBlock(id);
-    else { onSelectedBlockIdsChange([id]); onOpenBlock(id); }
+    else { onSelectedBlockIdsChange([id]); onOpenBlock(id, focus); }
   };
   return (
     <div className="flow-canvas-scroll" ref={viewportRef} onContextMenu={(e) => e.preventDefault()}
-      onPointerEnter={(e) => { mouseRef.current = { x: e.clientX, y: e.clientY }; }}
-      onPointerLeave={() => { mouseRef.current = undefined; }}
+      onPointerEnter={(e) => { mouseRef.current = { x: e.clientX, y: e.clientY }; onPointerBlockPositionChange?.(pointerBlockPosition(e.clientX, e.clientY)); }}
+      onPointerLeave={() => { mouseRef.current = undefined; onPointerBlockPositionChange?.(); }}
       onScroll={() => setMenu(undefined)}
       onPointerDown={(e) => {
         if (e.target instanceof Element && e.target.closest(".canvas-context-menu")) return;
@@ -303,7 +307,7 @@ export function FlowCanvas({
         panDragRef.current = { startX: e.clientX, startY: e.clientY, scrollLeft: e.currentTarget.scrollLeft, scrollTop: e.currentTarget.scrollTop, moved: false, blockId, linkId };
       }}
       onPointerMove={(e) => {
-        mouseRef.current = { x: e.clientX, y: e.clientY };
+        mouseRef.current = { x: e.clientX, y: e.clientY }; onPointerBlockPositionChange?.(pointerBlockPosition(e.clientX, e.clientY));
         const drag = panDragRef.current;
         if (!drag) return;
         if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 5) drag.moved = true;
@@ -319,7 +323,7 @@ export function FlowCanvas({
         if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) <= 5 && !linking) {
           if (drag.blockId) onSelectedBlockIdsChange([drag.blockId]);
           if (drag.linkId) onSelectLink(drag.linkId);
-          setMenu({ x: Math.max(0, Math.min(e.clientX, window.innerWidth - 190)), y: Math.max(0, Math.min(e.clientY, window.innerHeight - (drag.blockId ? 94 : 54))), position: worldPosition(drag.startX, drag.startY), blockId: drag.blockId, linkId: drag.linkId });
+          setMenu({ x: Math.max(0, Math.min(e.clientX, window.innerWidth - 190)), y: Math.max(0, Math.min(e.clientY, window.innerHeight - (drag.blockId ? 94 : 54))), position: pointerBlockPosition(drag.startX, drag.startY), blockId: drag.blockId, linkId: drag.linkId });
         }
         finishPanning(e.currentTarget, e.pointerId);
       }} onPointerCancel={(e) => finishPanning(e.currentTarget, e.pointerId)}
@@ -369,7 +373,7 @@ export function FlowCanvas({
               className={"flow-node" + (editingId === blockId ? " is-editing" : "") + (selectedBlockIdSet.has(blockId) ? " is-selected" : "") + (first ? " connection-first" : "") + (second ? " connection-second" : "")}
               role="button" tabIndex={0} aria-label={getDisplayTitle(block) + (linking ? " 연결 대상으로 선택" : " 편집")}
               onClick={(e) => { if (editingId !== blockId && !suppressClickRef.current) { e.currentTarget.focus(); activate(blockId); } }}
-              onDoubleClick={() => { if (!linking) { activate(blockId); setSummaryDraft(block.title ?? ""); setEditingId(blockId); } }}
+              onDoubleClick={() => { if (!linking) { activate(blockId, true); setSummaryDraft(block.title ?? ""); setEditingId(blockId); } }}
               onKeyDown={(e) => {
                 if (e.target !== e.currentTarget) return;
                 if (!linking && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
@@ -387,7 +391,7 @@ export function FlowCanvas({
                 if (e.repeat) return;
                 if (e.key === "Enter" || e.key === " ") {
                   if (connection.kind === "ready" && e.key === "Enter") return;
-                  e.preventDefault(); e.stopPropagation(); activate(blockId);
+                  e.preventDefault(); e.stopPropagation(); activate(blockId, e.key === "Enter");
                   if (!linking && e.key === "Enter") { setSummaryDraft(block.title ?? ""); setEditingId(blockId); }
                 }
               }}

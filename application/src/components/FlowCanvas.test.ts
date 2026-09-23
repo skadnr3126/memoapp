@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { boundsOverlap, clampScroll, findDirectionalNeighbor, getAutoScrollDelta, getPannedScroll } from "./FlowCanvas";
+import { boundsOverlap, centerNodeAt, clampScroll, findDirectionalNeighbor, getAutoScrollDelta, getPannedScroll } from "./FlowCanvas";
+
+describe("centerNodeAt", () => {
+  it("places the default node center at the pointer", () => {
+    expect(centerNodeAt({ x: 500, y: 300 })).toEqual({ x: 340, y: 228 });
+  });
+});
 
 describe("getPannedScroll", () => {
   it("moves the viewport opposite to the right-drag direction", () => {
