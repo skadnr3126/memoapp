@@ -126,7 +126,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .flow-work-area .flow-canvas-scroll { max-width: none; margin: 0; }
 
 .flow-canvas-scroll {
-  max-width: 1400px; height: calc(100vh - 72px); min-height: 430px; margin: 0 auto; overflow: auto; padding: 4px 0 24px;
+  max-width: 1400px; height: calc(100vh - 72px); margin: 0 auto; overflow: clip; padding: 4px 0 24px;
   scrollbar-color: #9ebca3 transparent; scrollbar-width: thin;
 }
 .flow-canvas-scroll.is-panning { cursor: grabbing; user-select: none; }
@@ -217,7 +217,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   .node-editor-footer { align-items: stretch; flex-direction: column-reverse; }
   .node-editor-footer > div { display: grid; grid-template-columns: 1fr 1fr; }
 }
-.graph-canvas { display: block; padding: 0; min-width: 100%; --node-width: 320px; --node-height: 144px; }
+.graph-canvas { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 0; --node-width: 320px; --node-height: 144px; }
 .graph-node-wrap { position: absolute; width: 320px; transform: none; z-index: 2; }
 .graph-node-wrap .flow-node { min-height: 72px; transform: none; position: relative; display: block; padding: 22px; border-radius: 12px; text-align: left; user-select: none; }
 .connection-layer .link-hit { stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
