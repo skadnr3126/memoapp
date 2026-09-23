@@ -442,7 +442,11 @@ function App() {
     const block = source.blocks.get(blockId);
     if (!block) return;
     setSelectedBlockIds([blockId]);
-    const focusEditor = () => WebviewWindow.getByLabel("editor").then((editor) => editor?.setFocus());
+    const focusEditor = async () => {
+      if (!isDesktopRuntime()) return;
+      const editor = await WebviewWindow.getByLabel("editor");
+      await editor?.setFocus();
+    };
     if (editorLockedRef.current || editorSessionRef.current?.blockId === blockId) {
       if (focus) void focusEditor().catch(() => setMessage("에디터 창에 포커스하지 못했습니다."));
       return;

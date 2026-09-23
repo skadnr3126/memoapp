@@ -241,6 +241,9 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .node-summary-input::placeholder { color: #87948b; }
 .graph-node-wrap .flow-node[style*="height"] .node-summary { height: 100%; overflow: hidden; }
 .graph-node-wrap .flow-node[style*="height"] .node-summary-text { height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+.node-editor-focus { position: absolute; right: 16px; bottom: 12px; z-index: 2; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid #9ebca3; border-radius: 5px; color: #31583a; background: #f7fbf5; cursor: pointer; }
+.node-editor-focus:hover { background: #e8f2e7; }
+.node-editor-focus:focus-visible { outline: 2px solid #398352; outline-offset: 2px; }
 .node-resize { position: absolute; width: 14px; height: 14px; padding: 0; border: 1px solid #398352; border-radius: 3px; background: #fff; opacity: 0; pointer-events: none; touch-action: none; transition: opacity 100ms ease; z-index: 3; }
 .graph-node-wrap:hover .node-resize, .graph-node-wrap:focus-within .node-resize { opacity: 1; pointer-events: auto; }
 .node-resize:focus-visible { outline: 3px solid #398352; outline-offset: 2px; }

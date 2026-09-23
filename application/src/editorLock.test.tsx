@@ -9,12 +9,12 @@ import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_LOCK, EDITOR_LOCKED, EDITOR_READY, ED
 
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (event: { payload: any }) => void>(),
-  emit: vi.fn().mockResolvedValue(undefined), open: vi.fn(),
+  emit: vi.fn().mockResolvedValue(undefined), open: vi.fn(), focus: vi.fn().mockResolvedValue(undefined),
   canvas: vi.fn<(props: ComponentProps<typeof FlowCanvas>) => null>(() => null),
 }));
 vi.mock("@tauri-apps/api/event", () => ({ emitTo: mocks.emit, listen: vi.fn(async (name, handler) => { mocks.handlers.set(name, handler); return () => mocks.handlers.delete(name); }) }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command) => command === "recent_workspaces" ? ["D:/notes"] : {}) }));
-vi.mock("@tauri-apps/api/webviewWindow", () => ({ WebviewWindow: { getByLabel: vi.fn(async () => ({})) } }));
+vi.mock("@tauri-apps/api/webviewWindow", () => ({ WebviewWindow: { getByLabel: vi.fn(async () => ({ setFocus: mocks.focus })) } }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ onCloseRequested: async () => () => {} }) }));
 vi.mock("./storage/repository", async importOriginal => ({ ...await importOriginal<object>(), isDesktopRuntime: () => true, openNativeWorkspace: mocks.open, chooseNativeWorkspace: vi.fn().mockResolvedValue("D:/other"), saveNativeWorkspace: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("./components/FlowCanvas", () => ({ FlowCanvas: mocks.canvas }));
@@ -27,7 +27,7 @@ const session = () => last(loads())[2] as EditorSession;
 const receive = async (name: string, payload?: unknown) => { await act(async () => mocks.handlers.get(name)!({ payload })); };
 const open = async (id: string) => { await act(async () => canvas().onOpenBlock(id)); };
 beforeEach(async () => {
-  vi.useFakeTimers(); mocks.handlers.clear(); mocks.emit.mockClear(); mocks.canvas.mockClear();
+  vi.useFakeTimers(); mocks.handlers.clear(); mocks.emit.mockClear(); mocks.canvas.mockClear(); mocks.focus.mockClear();
   const flow = createFlow(createWorkspace());
   const first = createBlock(flow.workspace, flow.flowId); a = first.blockId;
   const second = createBlock(first.workspace, flow.flowId); b = second.blockId;
@@ -42,6 +42,16 @@ beforeEach(async () => {
   await receive(EDITOR_READY);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers(); });
+
+it("focuses the editor only when the focus action is requested", async () => {
+  expect(mocks.focus).not.toHaveBeenCalled();
+  await act(async () => canvas().onOpenBlock(a, true));
+  expect(mocks.focus).toHaveBeenCalledTimes(1);
+  await open(b);
+  expect(mocks.focus).toHaveBeenCalledTimes(1);
+  await act(async () => canvas().onOpenBlock(b, true));
+  expect(mocks.focus).toHaveBeenCalledTimes(2);
+});
 
 it("pins the editor while selection, creation, deletion and saving continue; unlock resumes on the next selection", async () => {
   const pinned = session();

@@ -42,12 +42,14 @@ describe("summary editing", () => {
 
     key(nodes()[0], "Enter");
     field = host.querySelector<HTMLTextAreaElement>(".node-summary-input")!;
+    expect(document.activeElement).toBe(field);
     expect(field.selectionStart).toBe(field.value.length);
     expect(field.selectionEnd).toBe(field.value.length);
     key(field, "Escape");
 
     act(() => { nodes()[0].dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
     field = host.querySelector<HTMLTextAreaElement>(".node-summary-input")!;
+    expect(document.activeElement).toBe(field);
     expect(field.selectionStart).toBe(field.value.length);
     expect(field.selectionEnd).toBe(field.value.length);
   });

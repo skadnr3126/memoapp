@@ -403,7 +403,7 @@ export function FlowCanvas({
               className={"flow-node" + (editingId === blockId ? " is-editing" : "") + (selectedBlockIdSet.has(blockId) ? " is-selected" : "") + (first ? " connection-first" : "") + (second ? " connection-second" : "")}
               role="button" tabIndex={0} aria-label={getDisplayTitle(block) + (linking ? " 연결 대상으로 선택" : " 편집")}
               onClick={(e) => { if (editingId !== blockId && !suppressClickRef.current) { e.currentTarget.focus(); activate(blockId); } }}
-              onDoubleClick={() => { if (!linking) { activate(blockId, true); setSummaryDraft(block.title ?? ""); setEditingId(blockId); } }}
+              onDoubleClick={() => { if (!linking) { activate(blockId); setSummaryDraft(block.title ?? ""); setEditingId(blockId); } }}
               onKeyDown={(e) => {
                 if (e.target !== e.currentTarget) return;
                 if (!linking && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
@@ -421,7 +421,7 @@ export function FlowCanvas({
                 if (e.repeat) return;
                 if (e.key === "Enter" || e.key === " ") {
                   if (connection.kind === "ready" && e.key === "Enter") return;
-                  e.preventDefault(); e.stopPropagation(); activate(blockId, e.key === "Enter");
+                  e.preventDefault(); e.stopPropagation(); activate(blockId);
                   if (!linking && e.key === "Enter") { setSummaryDraft(block.title ?? ""); setEditingId(blockId); }
                 }
               }}
@@ -460,6 +460,8 @@ export function FlowCanvas({
               </div>
               {(first || second) && <span className="connection-order">{first ? "첫 번째" : "두 번째"}</span>}
             </article>
+            {!linking && <button type="button" className="node-editor-focus" aria-label="에디터 창으로 이동" title="에디터 창으로 이동"
+              onClick={e => { e.stopPropagation(); activate(blockId, true); }}>↗</button>}
             {!linking && (["nw", "ne", "sw", "se"] as const).map(corner => <button key={corner} type="button"
               className={`node-resize node-resize-${corner}`} aria-label={`${corner} 모서리 크기 조절`}
               onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}

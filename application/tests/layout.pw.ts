@@ -9,7 +9,7 @@ test("cleared text stays empty; all corners resize and moving retains size", asy
   await title.fill("space works");
   await expect(title).toHaveValue("space works");
   await page.keyboard.press("Tab");
-  await page.locator(".flow-canvas-scroll").hover({ position: { x: 100, y: 100 } });
+  await page.locator(".flow-canvas-scroll").hover({ position: { x: 400, y: 300 } });
   await page.keyboard.press("Control+t");
   const node = page.locator(".flow-node").first();
   const southeast = page.getByRole("button", { name: "se 모서리 크기 조절" });
@@ -32,6 +32,9 @@ test("cleared text stays empty; all corners resize and moving retains size", asy
     expect(after.height).toBeCloseTo(before.height + 20, 0);
     expect(corner.includes("w") ? after.x + after.width : after.x).toBeCloseTo(corner.includes("w") ? before.x + before.width : before.x, 0);
     expect(corner.includes("n") ? after.y + after.height : after.y).toBeCloseTo(corner.includes("n") ? before.y + before.height : before.y, 0);
+    const focusButton = (await page.locator(".node-editor-focus").first().boundingBox())!;
+    expect(after.x + after.width - (focusButton.x + focusButton.width)).toBeCloseTo(16, 0);
+    expect(after.y + after.height - (focusButton.y + focusButton.height)).toBeCloseTo(12, 0);
   }
   const before = (await node.boundingBox())!;
   await page.mouse.move(before.x + 40, before.y + 40);
