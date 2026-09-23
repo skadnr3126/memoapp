@@ -18,6 +18,8 @@ it("checks the OpenRouter key before saving and renders its output as text", asy
   try {
     await act(async () => root.render(<FlowSummary prepare={prepare} />));
     await act(async () => { host.querySelector("button")!.click(); });
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    await act(async () => { host.querySelector<HTMLButtonElement>('.flow-summary-key .button-primary')!.click(); });
     expect(mocks.invoke).toHaveBeenCalledWith("has_openrouter_api_key");
     expect(mocks.invoke).not.toHaveBeenCalledWith("summarize_flow", expect.anything());
     expect(host.querySelector("button")!.disabled).toBe(true);
@@ -28,10 +30,28 @@ it("checks the OpenRouter key before saving and renders its output as text", asy
     await act(async () => root.render(<FlowSummary prepare={async () => { throw new Error("save failed"); }} />));
     mocks.invoke.mockClear();
     await act(async () => { host.querySelector("button")!.click(); });
+    await act(async () => { host.querySelector<HTMLButtonElement>('.flow-summary-key .button-primary')!.click(); });
     expect(mocks.invoke).not.toHaveBeenCalledWith("summarize_flow", expect.anything());
     expect(host.querySelector('[role="alert"]')!.textContent).toContain("save failed");
     mocks.invoke.mockReset().mockResolvedValue(false);
     await act(async () => { host.querySelector("button")!.click(); });
+    await act(async () => { host.querySelector<HTMLButtonElement>('.flow-summary-key .button-primary')!.click(); });
     expect(host.querySelector<HTMLInputElement>('#openrouter-api-key')?.type).toBe("password");
+    await act(async () => { host.querySelector<HTMLButtonElement>('.flow-summary-close')!.click(); });
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  } finally { act(() => root.unmount()); }
+});
+
+it("deletes the saved key from the confirmation window", async () => {
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  mocks.invoke.mockReset().mockResolvedValue(undefined);
+  try {
+    await act(async () => root.render(<FlowSummary prepare={vi.fn()} />));
+    await act(async () => { host.querySelector("button")!.click(); });
+    await act(async () => { host.querySelectorAll<HTMLButtonElement>('.flow-summary-key .button')[1].click(); });
+    expect(mocks.invoke).toHaveBeenCalledWith("delete_openrouter_api_key");
+    expect(host.querySelector<HTMLInputElement>('#openrouter-api-key')).not.toBeNull();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("summarize_flow", expect.anything());
   } finally { act(() => root.unmount()); }
 });

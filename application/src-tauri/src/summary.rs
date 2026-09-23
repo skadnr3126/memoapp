@@ -113,6 +113,19 @@ fn write_api_key(key: &str) -> Result<(), String> {
 }
 
 #[cfg(windows)]
+fn delete_api_key() -> Result<(), String> {
+    use windows_sys::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
+    let target: Vec<u16> = CREDENTIAL_TARGET.encode_utf16().chain(Some(0)).collect();
+    if unsafe { CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0) } == 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(1168) {
+            return Err(format!("OpenRouter API 키 삭제 실패: {error}"));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
 fn delete_old_gemini_key() {
     use windows_sys::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
     let target: Vec<u16> = OLD_CREDENTIAL_TARGET
@@ -134,6 +147,10 @@ fn read_api_key() -> Result<Option<String>, String> {
 #[cfg(not(windows))]
 fn write_api_key(_: &str) -> Result<(), String> {
     Err("현재 OpenRouter API 키 저장은 Windows에서만 지원합니다.".into())
+}
+#[cfg(not(windows))]
+fn delete_api_key() -> Result<(), String> {
+    Err("현재 OpenRouter API 키 삭제는 Windows에서만 지원합니다.".into())
 }
 
 fn client() -> Result<reqwest::blocking::Client, String> {
@@ -264,6 +281,12 @@ fn main_window(window: &tauri::Window) -> Result<(), String> {
 pub fn has_openrouter_api_key(window: tauri::Window) -> Result<bool, String> {
     main_window(&window)?;
     Ok(read_api_key()?.is_some())
+}
+
+#[tauri::command]
+pub fn delete_openrouter_api_key(window: tauri::Window) -> Result<(), String> {
+    main_window(&window)?;
+    delete_api_key()
 }
 
 #[tauri::command]
