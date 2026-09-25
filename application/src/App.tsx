@@ -406,7 +406,15 @@ function App() {
       if (closing || transitioningRef.current) return;
       closing = true;
       transitioningRef.current = true;
-      try { await flushRef.current(); await savePreferencesRef.current(); await getCurrentWindow().destroy(); }
+      try {
+        await editorOpeningRef.current?.catch(() => undefined);
+        const editor = await WebviewWindow.getByLabel("editor");
+        if (editor) await flushEditor();
+        await flushRef.current();
+        await savePreferencesRef.current();
+        await editor?.destroy();
+        await getCurrentWindow().destroy();
+      }
       catch (error) { setStorageError(`종료 전 저장 실패: ${String(error)}`); closing = false; transitioningRef.current = false; }
     }).then((unlisten) => { if (disposed) unlisten(); else stop = unlisten; });
     return () => { disposed = true; stop?.(); };
