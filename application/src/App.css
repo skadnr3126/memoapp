@@ -136,10 +136,15 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .flow-work-area .flow-canvas-scroll { max-width: none; margin: 0; }
 
 .flow-canvas-scroll {
-  max-width: 1400px; height: calc(100vh - 72px); margin: 0 auto; overflow: clip; padding: 4px 0 24px;
+  max-width: 1400px; height: calc(100vh - 72px); margin: 0 auto; overflow: auto; padding: 0;
+  overflow-anchor: none; overscroll-behavior: contain;
   scrollbar-color: #9ebca3 transparent; scrollbar-width: thin;
 }
 .flow-canvas-scroll.is-panning { cursor: grabbing; user-select: none; }
+.canvas-container { position: relative; }
+.canvas-surface { position: relative; overflow: clip; }
+.canvas-surface > .graph-canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.canvas-zoom { position: absolute; z-index: 4; right: 22px; top: 8px; padding: 4px 8px; border-radius: 5px; background: #fffefbe6; color: #54655a; font-size: .72rem; pointer-events: none; }
 .flow-canvas {
   --node-width: 214px; --node-gap: 48px; --node-height: 145px; --node-padding: 14px;
   --node-title-size: .92rem; --node-body-size: .74rem; --node-meta-size: .63rem;

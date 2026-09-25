@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { boundsOverlap, centerNodeAt, clampScroll, findDirectionalNeighbor, getAutoScrollDelta, getPannedScroll, keepNodeInside } from "./FlowCanvas";
 
-it("keeps every block corner inside a fixed canvas", () => {
-  expect(keepNodeInside({ x: -20, y: 490, width: 320, height: 144 }, 600, 500)).toEqual({ x: 0, y: 356, width: 320, height: 144 });
-  expect(keepNodeInside({ x: 700, y: -10, width: 800, height: 600 }, 600, 500)).toEqual({ x: 0, y: 0, width: 600, height: 500 });
+it("fixes the top-left boundary without limiting growth to the right or bottom", () => {
+  expect(keepNodeInside({ x: -20, y: 490, width: 320, height: 144 })).toEqual({ x: 0, y: 490, width: 320, height: 144 });
+  expect(keepNodeInside({ x: 700, y: -10, width: 800, height: 600 })).toEqual({ x: 700, y: 0, width: 800, height: 600 });
 });
 
 describe("centerNodeAt", () => {

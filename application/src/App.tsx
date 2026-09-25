@@ -618,7 +618,8 @@ function App() {
     const height = Math.max(...copied.blocks.map(block => block.y + (block.height ?? NODE_HEIGHT)));
     const { positions, preferred } = newBlockPlacement(activeFlow);
     const pointer = pointerBlockPositionRef.current;
-    const point = findFreePosition(positions, { ...(pointer ? centerNodeAt({ ...pointer, width, height }) : preferred), width, height });
+    const anchor = pointer ? centerNodeAt({ ...pointer, width, height }) : preferred;
+    const point = findFreePosition(positions, { x: Math.max(0, anchor.x), y: Math.max(0, anchor.y), width, height });
     const created = runCommand("블록 붙여넣기", (current) => {
       let next = current;
       const ids = new Map<string, BlockId>();

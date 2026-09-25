@@ -13,7 +13,6 @@ type PointerDrag = {
   scrollLeft: number;
   scrollTop: number;
   positions: Record<BlockId, NodePosition>;
-  origin: NodePosition;
   moved: boolean;
 };
 type PanDrag = { startX: number; startY: number; scrollLeft: number; scrollTop: number };
@@ -38,17 +37,11 @@ export const clampScroll = (position: number, maximum: number) => Math.max(0, Ma
 
 export const centerNodeAt = ({ x, y, width, height }: NodePosition): NodePosition => ({ x: x - (width ?? NODE_WIDTH) / 2, y: y - (height ?? NODE_HEIGHT) / 2 });
 
-export const keepNodeInside = (point: NodePosition, canvasWidth: number, canvasHeight: number, nodeHeight = NODE_HEIGHT): NodePosition => {
-  const width = Math.min(point.width ?? NODE_WIDTH, canvasWidth);
-  const height = Math.min(point.height ?? nodeHeight, canvasHeight);
-  return {
-    ...point,
-    x: Math.max(0, Math.min(point.x, canvasWidth - width)),
-    y: Math.max(0, Math.min(point.y, canvasHeight - height)),
-    ...(width !== (point.width ?? NODE_WIDTH) ? { width } : {}),
-    ...(height !== (point.height ?? nodeHeight) ? { height } : {}),
-  };
-};
+export const keepNodeInside = (point: NodePosition): NodePosition => ({
+  ...point, x: Math.max(0, point.x), y: Math.max(0, point.y),
+});
+const resizeInside = (rect: Required<Point>, corner: ResizeCorner, dx: number, dy: number) =>
+  resizeNode(rect, corner, corner.includes("w") ? Math.max(-rect.x, dx) : dx, corner.includes("n") ? Math.max(-rect.y, dy) : dy);
 
 /** Finds the most natural neighboring node in the requested direction. */
 export const findDirectionalNeighbor = (
@@ -115,6 +108,11 @@ export function FlowCanvas({
 }: FlowCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
+  const zoomAnchorRef = useRef<{ x: number; y: number; left: number; top: number } | undefined>(undefined);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 800 });
   const nodeElementsRef = useRef(new Map<BlockId, HTMLElement>());
   const pointerDragRef = useRef<PointerDrag | undefined>(undefined);
   const resizeRef = useRef<{ id: string; corner: ResizeCorner; x: number; y: number; rect: Required<Point> } | undefined>(undefined);
@@ -131,15 +129,50 @@ export function FlowCanvas({
   const [summaryDraft, setSummaryDraft] = useState("");
   const [editingId, setEditingId] = useState<BlockId>();
   const [heights, setHeights] = useState<Record<BlockId, number>>({});
-  const keepPositionsInside = (next: Record<BlockId, NodePosition>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return next;
-    return Object.fromEntries(Object.entries(next).map(([id, point]) => [id, keepNodeInside(point, canvas.clientWidth, canvas.clientHeight, heights[id])]));
-  };
+  const keepPositionsInside = (next: Record<BlockId, NodePosition>) =>
+    Object.fromEntries(Object.entries(next).map(([id, point]) => [id, keepNodeInside(point)]));
   const updatePositions = (next: Record<BlockId, NodePosition>) => onNodePositionsChange(keepPositionsInside(next));
   useLayoutEffect(() => {
+    const viewport = viewportRef.current!;
+    const measure = () => setViewportSize({ width: viewport.clientWidth, height: viewport.clientHeight });
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    const viewport = viewportRef.current!;
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      if (pointerDragRef.current || resizeRef.current || selectionDragRef.current || panDragRef.current) return;
+      const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1);
+      const next = Math.max(0.1, Math.min(3, zoomRef.current * Math.exp(-Math.max(-500, Math.min(500, delta)) * 0.002)));
+      const bounds = viewport.getBoundingClientRect();
+      const left = event.clientX - bounds.left, top = event.clientY - bounds.top;
+      zoomAnchorRef.current = { x: (viewport.scrollLeft + left) / zoomRef.current, y: (viewport.scrollTop + top) / zoomRef.current, left, top };
+      zoomRef.current = next;
+      setZoom(next);
+      setMenu(undefined);
+    };
+    viewport.addEventListener("wheel", wheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", wheel);
+  }, []);
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current;
+    const viewport = viewportRef.current;
+    if (anchor && viewport) {
+      viewport.scrollLeft = anchor.x * zoom - anchor.left;
+      viewport.scrollTop = anchor.y * zoom - anchor.top;
+      zoomAnchorRef.current = undefined;
+    }
+    const pointer = mouseRef.current;
+    if (pointer) onPointerBlockPositionChange?.(worldPosition(pointer.x, pointer.y));
+  }, [zoom]);
+  useLayoutEffect(() => {
     const measure = () => {
-      const next = Object.fromEntries([...nodeElementsRef.current].map(([id, element]) => [id, element.getBoundingClientRect().height || NODE_HEIGHT]));
+      const next = Object.fromEntries([...nodeElementsRef.current].map(([id, element]) => [id, element.offsetHeight || NODE_HEIGHT]));
       setHeights(current => Object.keys(next).length === Object.keys(current).length && Object.entries(next).every(([id, height]) => current[id] === height) ? current : next);
     };
     measure();
@@ -152,7 +185,7 @@ export function FlowCanvas({
   const linking = connection.kind !== "idle";
   const worldPosition = (x: number, y: number) => {
     const bounds = canvasRef.current!.getBoundingClientRect();
-    return { x: x - bounds.left + originRef.current.x, y: y - bounds.top + originRef.current.y };
+    return { x: (x - bounds.left) / zoomRef.current, y: (y - bounds.top) / zoomRef.current };
   };
   const pointerBlockPosition = (x: number, y: number) => centerNodeAt(worldPosition(x, y));
   useEffect(() => {
@@ -185,29 +218,17 @@ export function FlowCanvas({
   useEffect(() => { if (menu?.linkId && !flow.links.has(menu.linkId)) setMenu(undefined); }, [flow.links, menu]);
   useEffect(() => { if (menu) menuRef.current?.querySelector("button")?.focus(); }, [menu]);
   const positions = Object.fromEntries(flow.blockIds.map((id, index) => [id, nodePositions[id] ?? defaultPosition(index)]));
+  const contentWidth = Math.max(canvasSize.width, viewportSize.width, ...Object.values(positions).map(point => point.x + (point.width ?? NODE_WIDTH) + 320));
+  const contentHeight = Math.max(canvasSize.height, viewportSize.height, ...Object.entries(positions).map(([id, point]) => point.y + (point.height ?? heights[id] ?? NODE_HEIGHT) + 320));
+  const width = Math.max(contentWidth, viewportSize.width / zoom);
+  const height = Math.max(contentHeight, viewportSize.height / zoom);
   useLayoutEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const fit = () => {
-      const fitted = keepPositionsInside(positions);
-      const changed = Object.fromEntries(Object.entries(fitted).filter(([id, point]) => JSON.stringify(point) !== JSON.stringify(positions[id])));
-      if (Object.keys(changed).length) onNodePositionsChange(changed);
-    };
-    fit();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(fit);
-    observer.observe(canvas);
-    return () => observer.disconnect();
-  }, [positions, heights, onNodePositionsChange]);
-  const origin = { x: 0, y: 0 };
-  const screenPosition = (id: string) => ({ ...positions[id], x: positions[id].x - origin.x, y: positions[id].y - origin.y });
-  const pathBetween = (a: string, b: string) => linkPath(screenPosition(a), screenPosition(b), heights[a], heights[b]);
-  const originRef = useRef(origin);
-  useLayoutEffect(() => {
-    const viewport = viewportRef.current;
-    if (viewport) { viewport.scrollLeft += originRef.current.x - origin.x; viewport.scrollTop += originRef.current.y - origin.y; }
-    originRef.current = origin;
-  }, [origin.x, origin.y]);
+    if (contentWidth > canvasSize.width || contentHeight > canvasSize.height) setCanvasSize({ width: contentWidth, height: contentHeight });
+    const changed = Object.fromEntries(Object.entries(positions).filter(([, point]) => point.x < 0 || point.y < 0).map(([id, point]) => [id, keepNodeInside(point)]));
+    if (Object.keys(changed).length) onNodePositionsChange(changed);
+  }, [contentWidth, contentHeight, positions, onNodePositionsChange]);
+  const screenPosition = (id: string) => positions[id];
+  const pathBetween = (a: string, b: string) => linkPath(positions[a], positions[b], heights[a], heights[b]);
 
   const finishPanning = (viewport: HTMLDivElement, pointerId: number) => {
     if (!panDragRef.current) return;
@@ -219,8 +240,8 @@ export function FlowCanvas({
   const updateDraggedBlocks = (drag: PointerDrag) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const x = drag.currentX - drag.startX + viewport.scrollLeft - drag.scrollLeft + originRef.current.x - drag.origin.x;
-    const y = drag.currentY - drag.startY + viewport.scrollTop - drag.scrollTop + originRef.current.y - drag.origin.y;
+    const x = Math.max((drag.currentX - drag.startX + viewport.scrollLeft - drag.scrollLeft) / zoomRef.current, -Math.min(...Object.values(drag.positions).map(point => point.x)));
+    const y = Math.max((drag.currentY - drag.startY + viewport.scrollTop - drag.scrollTop) / zoomRef.current, -Math.min(...Object.values(drag.positions).map(point => point.y)));
     if (Math.abs(x) > 3 || Math.abs(y) > 3) drag.moved = true;
     updatePositions(Object.fromEntries(drag.blockIds.map((id) => [id, { ...drag.positions[id], x: drag.positions[id].x + x, y: drag.positions[id].y + y }])));
   };
@@ -230,7 +251,7 @@ export function FlowCanvas({
     const canvas = canvasRef.current;
     if (!drag || !canvas) return;
     const bounds = canvas.getBoundingClientRect();
-    const next = { ...drag, currentX: clientX - bounds.left, currentY: clientY - bounds.top };
+    const next = { ...drag, currentX: (clientX - bounds.left) / zoomRef.current, currentY: (clientY - bounds.top) / zoomRef.current };
     selectionDragRef.current = next;
     setSelectionDrag(next);
   };
@@ -256,7 +277,7 @@ export function FlowCanvas({
       autoScrollFrameRef.current = undefined;
       return;
     }
-    const limit = autoScrollLimitRef.current ?? { x: viewport.scrollWidth - viewport.clientWidth, y: viewport.scrollHeight - viewport.clientHeight };
+    const limit = (pointerDragRef.current ? undefined : autoScrollLimitRef.current) ?? { x: viewport.scrollWidth - viewport.clientWidth, y: viewport.scrollHeight - viewport.clientHeight };
     const nextLeft = clampScroll(viewport.scrollLeft + left, limit.x);
     const nextTop = clampScroll(viewport.scrollTop + top, limit.y);
     if (nextLeft === viewport.scrollLeft && nextTop === viewport.scrollTop) {
@@ -296,10 +317,10 @@ export function FlowCanvas({
 
     const canvasBounds = canvas.getBoundingClientRect();
     const selection: Bounds = {
-      left: canvasBounds.left + Math.min(drag.startX, drag.currentX),
-      top: canvasBounds.top + Math.min(drag.startY, drag.currentY),
-      right: canvasBounds.left + Math.max(drag.startX, drag.currentX),
-      bottom: canvasBounds.top + Math.max(drag.startY, drag.currentY),
+      left: canvasBounds.left + Math.min(drag.startX, drag.currentX) * zoomRef.current,
+      top: canvasBounds.top + Math.min(drag.startY, drag.currentY) * zoomRef.current,
+      right: canvasBounds.left + Math.max(drag.startX, drag.currentX) * zoomRef.current,
+      bottom: canvasBounds.top + Math.max(drag.startY, drag.currentY) * zoomRef.current,
     };
     onSelectedBlockIdsChange([...nodeElementsRef.current.entries()]
       .filter(([, element]) => {
@@ -323,10 +344,12 @@ export function FlowCanvas({
     else { onSelectedBlockIdsChange([id]); onOpenBlock(id, focus); }
   };
   return (
+    <div className="canvas-container">
+    <output className="canvas-zoom" aria-label="캔버스 배율">{Math.round(zoom * 100)}% · Ctrl + 휠</output>
     <div className="flow-canvas-scroll" ref={viewportRef} onContextMenu={(e) => e.preventDefault()}
       onPointerEnter={(e) => { mouseRef.current = { x: e.clientX, y: e.clientY }; onPointerBlockPositionChange?.(worldPosition(e.clientX, e.clientY)); }}
       onPointerLeave={() => { mouseRef.current = undefined; onPointerBlockPositionChange?.(); }}
-      onScroll={() => setMenu(undefined)}
+      onScroll={() => { setMenu(undefined); const pointer = mouseRef.current; if (pointer) onPointerBlockPositionChange?.(worldPosition(pointer.x, pointer.y)); }}
       onPointerDown={(e) => {
         if (e.target instanceof Element && e.target.closest(".canvas-context-menu")) return;
         if (e.button !== 2) return;
@@ -365,14 +388,15 @@ export function FlowCanvas({
           <button role="menuitem" onClick={() => { onDeleteBlock?.(menu.blockId!); setMenu(undefined); }}>삭제 <span>Delete</span></button>
         </> : <button role="menuitem" onClick={() => { onCreateBlock?.(menu.position); setMenu(undefined); }}>새 노드 생성 <span>Ctrl+T</span></button>}
       </div>}
-      <div className="flow-canvas graph-canvas" ref={canvasRef}
+      <div className="canvas-surface" style={{ width: width * zoom, height: height * zoom }}>
+      <div className="flow-canvas graph-canvas" ref={canvasRef} style={{ width, height, transform: `scale(${zoom})` }}
         onPointerDown={(e) => {
           if (linking || e.button !== 0 || (e.target instanceof Element && e.target.closest(".node-wrap, .link-hit"))) return;
           setEditingId(undefined);
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           onSelectedBlockIdsChange([]);
           e.preventDefault(); const bounds = e.currentTarget.getBoundingClientRect();
-          const drag = { startX: e.clientX - bounds.left, startY: e.clientY - bounds.top, currentX: e.clientX - bounds.left, currentY: e.clientY - bounds.top };
+          const drag = { startX: (e.clientX - bounds.left) / zoom, startY: (e.clientY - bounds.top) / zoom, currentX: (e.clientX - bounds.left) / zoom, currentY: (e.clientY - bounds.top) / zoom };
           e.currentTarget.setPointerCapture(e.pointerId); setAutoScrollLimit(); selectionDragRef.current = drag; setSelectionDrag(drag);
         }}
         onPointerMove={(e) => { if (selectionDragRef.current) { updateSelectionDrag(e.clientX, e.clientY); startAutoScroll(e.clientX, e.clientY); } }}
@@ -433,7 +457,7 @@ export function FlowCanvas({
                 setAutoScrollLimit();
                 pointerDragRef.current = { blockIds, startX: e.clientX, startY: e.clientY, currentX: e.clientX, currentY: e.clientY,
                   scrollLeft: viewportRef.current?.scrollLeft ?? 0, scrollTop: viewportRef.current?.scrollTop ?? 0,
-                  positions: Object.fromEntries(blockIds.map((id) => [id, positions[id]])), origin, moved: false };
+                  positions: Object.fromEntries(blockIds.map((id) => [id, positions[id]])), moved: false };
               }}
               onPointerMove={(e) => { const drag = pointerDragRef.current; if (!drag || !drag.blockIds.includes(blockId)) return; drag.currentX = e.clientX; drag.currentY = e.clientY; updateDraggedBlocks(drag); startAutoScroll(e.clientX, e.clientY); }}
               onPointerUp={(e) => { const drag = pointerDragRef.current; if (drag?.moved) { suppressClickRef.current = true; window.setTimeout(() => { suppressClickRef.current = false; }, 0); } if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); pointerDragRef.current = undefined; stopAutoScroll(); }}
@@ -475,7 +499,7 @@ export function FlowCanvas({
               onPointerMove={e => {
                 const drag = resizeRef.current;
                 if (!drag || drag.id !== blockId) return;
-                updatePositions({ [blockId]: resizeNode(drag.rect, drag.corner, e.clientX - drag.x, e.clientY - drag.y) });
+                updatePositions({ [blockId]: resizeInside(drag.rect, drag.corner, (e.clientX - drag.x) / zoom, (e.clientY - drag.y) / zoom) });
               }}
               onPointerUp={e => { resizeRef.current = undefined; if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); }}
               onPointerCancel={() => { resizeRef.current = undefined; }}
@@ -483,12 +507,14 @@ export function FlowCanvas({
               onKeyDown={e => {
                 if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
                 e.preventDefault(); e.stopPropagation();
-                updatePositions({ [blockId]: resizeNode({ ...positions[blockId], width: point.width ?? NODE_WIDTH, height: heights[blockId] ?? NODE_HEIGHT }, corner,
+                updatePositions({ [blockId]: resizeInside({ ...positions[blockId], width: point.width ?? NODE_WIDTH, height: heights[blockId] ?? NODE_HEIGHT }, corner,
                   e.key === "ArrowLeft" ? -10 : e.key === "ArrowRight" ? 10 : 0, e.key === "ArrowUp" ? -10 : e.key === "ArrowDown" ? 10 : 0) });
               }} />)}
           </div>;
         })}
       </div>
+      </div>
+    </div>
     </div>
   );
 }
