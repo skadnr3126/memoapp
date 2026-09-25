@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import App from "./App";
 import type { FlowCanvas } from "./components/FlowCanvas";
+import { BLOCK_CLIPBOARD_TYPE } from "./blockClipboard";
 import { createBlock, createFlow, createWorkspace } from "./domain/flow";
 import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_LOCK, EDITOR_LOCKED, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED, type EditorSession } from "./editorProtocol";
 
@@ -27,6 +28,14 @@ const canvas = () => last(mocks.canvas.mock.calls)[0];
 const loads = () => mocks.emit.mock.calls.filter(call => call[1] === EDITOR_LOAD);
 const session = () => last(loads())[2] as EditorSession;
 const receive = async (name: string, payload?: unknown) => { await act(async () => mocks.handlers.get(name)!({ payload })); };
+const clipboard = async (name: string, data = new Map<string, string>(), target: EventTarget = window) => {
+  const event = new Event(name, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: {
+    setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) ?? "",
+  } });
+  await act(async () => { target.dispatchEvent(event); });
+  return { data, event };
+};
 const open = async (id: string) => { await act(async () => canvas().onOpenBlock(id)); };
 beforeEach(async () => {
   mocks.flush.mockReset().mockResolvedValue(undefined); mocks.save.mockReset().mockResolvedValue(undefined); mocks.choose.mockReset().mockResolvedValue("D:/other"); mocks.open.mockReset();
@@ -196,6 +205,52 @@ it("cancels without changing tabs and prevents duplicate folder dialogs", async 
   expect(mocks.choose).toHaveBeenCalledTimes(1);
   await act(async () => finish(undefined));
   expect(tabs()).toHaveLength(1);
+});
+
+it("copies a connected selection across workspaces with geometry, fresh IDs and one-step undo", async () => {
+  await act(async () => canvas().onRenameBlock(a, "first"));
+  await receive(EDITOR_SAVE, { ...session(), markdown: "body" });
+  await act(async () => canvas().onNodePositionsChange({ [a]: { x: -100, y: 20, width: 400, height: 200 }, [b]: { x: 500, y: 80 } }));
+  await act(async () => canvas().onBeginConnection!(a));
+  await act(async () => canvas().onChooseConnectionBlock(b));
+  await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" })));
+  await act(async () => canvas().onSelectedBlockIdsChange([a, b]));
+  const { data, event } = await clipboard("copy");
+  expect(event.defaultPrevented).toBe(true);
+  expect(canvas().workspace.blocks.size).toBe(2);
+  await addOther();
+  const before = canvas().workspace;
+  await clipboard("paste", data);
+  const ids = canvas().selectedBlockIds;
+  expect(ids).toHaveLength(2);
+  expect(ids).not.toContain(a); expect(ids).not.toContain(b);
+  expect(canvas().workspace.blocks.get(ids[0])).toMatchObject({ title: "first", markdown: "body" });
+  const positions = canvas().nodePositions;
+  expect(positions[ids[0]]).toMatchObject({ width: 400, height: 200 });
+  expect(positions[ids[1]]!.x - positions[ids[0]]!.x).toBe(600);
+  expect(positions[ids[1]]!.y - positions[ids[0]]!.y).toBe(60);
+  expect([...canvas().flow.links.values()].some(link => link.source === ids[0] && link.target === ids[1])).toBe(true);
+  await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true })));
+  expect(canvas().workspace).toBe(before);
+  expect(canvas().nodePositions[ids[0]]).toBeUndefined();
+});
+
+it("cuts all selected blocks atomically, restores them with undo and leaves text editing alone", async () => {
+  await act(async () => canvas().onNodePositionsChange({ [a]: { x: 10, y: 20 }, [b]: { x: 500, y: 20 } }));
+  await act(async () => canvas().onSelectedBlockIdsChange([a, b]));
+  const before = canvas().workspace;
+  const { data } = await clipboard("cut");
+  expect(canvas().workspace.blocks.size).toBe(0);
+  expect(canvas().nodePositions).toEqual({});
+  await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true })));
+  expect(canvas().workspace).toBe(before);
+  expect(canvas().nodePositions[a]).toEqual({ x: 10, y: 20 });
+  const input = host.querySelector("input")!;
+  expect((await clipboard("paste", data, input)).event.defaultPrevented).toBe(false);
+  expect(canvas().workspace).toBe(before);
+  expect((await clipboard("paste", new Map([[BLOCK_CLIPBOARD_TYPE, '{"version":2,"blocks":[]}']]))).event.defaultPrevented).toBe(false);
+  await act(async () => canvas().onSelectedBlockIdsChange([a]));
+  expect((await clipboard("copy")).event.defaultPrevented).toBe(true);
 });
 
 it("saves again when the editor changes while the disk write is pending", async () => {

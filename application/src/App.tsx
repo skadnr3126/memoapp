@@ -18,7 +18,7 @@ import {
   validateWorkspace,
 } from "./domain/flow";
 import { ConnectionState, startConnection, chooseConnectionBlock } from "./domain/connection";
-import { defaultPosition, findFreePosition, NODE_WIDTH } from "./domain/layout";
+import { defaultPosition, findFreePosition, NODE_WIDTH, NODE_HEIGHT } from "./domain/layout";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { FlowCanvas, centerNodeAt, type NodePosition } from "./components/FlowCanvas";
@@ -39,7 +39,7 @@ import { clampSidebarWidth } from "./sidebarWidth";
 import "./App.css";
 import { FlowSummary } from "./components/FlowSummary";
 import { flowSummaryInput, flushEditor } from "./flowSummary";
-import { BLOCK_CLIPBOARD_TYPE, parseCopiedBlock, serializeCopiedBlock, type CopiedBlock } from "./blockClipboard";
+import { BLOCK_CLIPBOARD_TYPE, parseCopiedBlocks, serializeCopiedBlocks, type CopiedBlocks } from "./blockClipboard";
 
 type OpenWorkspace = {
   workspaceRoot: string;
@@ -595,9 +595,11 @@ function App() {
     }
   };
 
-  const deleteSelectedBlock = (blockId: BlockId) => {
-    if (!activeFlow) return;
-    const result = runCommand("노드 삭제", (current) => deleteBlock(current, activeFlow.id, blockId));
+  const deleteSelectedBlocks = (blockIds: BlockId[]) => {
+    if (!activeFlow || !blockIds.length) return;
+    const result = runCommand("노드 삭제", (current) => ({
+      workspace: blockIds.reduce((next, id) => deleteBlock(next, activeFlow.id, id).workspace, current),
+    }));
     if (!result) return;
     const deletedBlockIds = new Set([...workspace.blocks.keys()].filter((id) => !result.workspace.blocks.has(id)));
     setNodePositionsByFlow((current) => ({
@@ -608,42 +610,55 @@ function App() {
     }));
     setSelectedBlockIds([]);
   };
+  const deleteSelectedBlock = (blockId: BlockId) => deleteSelectedBlocks([blockId]);
 
-  const pasteBlock = (block: CopiedBlock) => {
+  const pasteBlocks = (copied: CopiedBlocks) => {
     if (!activeFlow || connection.kind !== "idle") return;
-    const created = runCommand("블록 붙여넣기", (current) => {
-      const result = createBlock(current, activeFlow.id);
-      return { ...updateBlock(result.workspace, result.blockId, { title: block.title, markdown: block.markdown }), blockId: result.blockId };
-    });
-    if (!created) return;
+    const width = Math.max(...copied.blocks.map(block => block.x + (block.width ?? NODE_WIDTH)));
+    const height = Math.max(...copied.blocks.map(block => block.y + (block.height ?? NODE_HEIGHT)));
     const { positions, preferred } = newBlockPlacement(activeFlow);
     const pointer = pointerBlockPositionRef.current;
-    const point = pointer ? { ...centerNodeAt({ ...pointer, width: block.width, height: block.height }), width: block.width, height: block.height } : findFreePosition(positions, { ...preferred, width: block.width, height: block.height });
-    setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], [created.blockId]: point } }));
-    setSelectedBlockIds([created.blockId]); setSelectedLinkId(undefined);
+    const point = findFreePosition(positions, { ...(pointer ? centerNodeAt({ ...pointer, width, height }) : preferred), width, height });
+    const created = runCommand("블록 붙여넣기", (current) => {
+      let next = current;
+      const ids = new Map<string, BlockId>();
+      const pastedPositions: Record<BlockId, NodePosition> = {};
+      // ponytail: existing commands clone per block; add a batch domain command if large selections become slow.
+      for (const block of copied.blocks) {
+        const result = createBlock(next, activeFlow.id);
+        next = updateBlock(result.workspace, result.blockId, { title: block.title, markdown: block.markdown }).workspace;
+        ids.set(block.id, result.blockId);
+        pastedPositions[result.blockId] = { x: point.x + block.x, y: point.y + block.y, width: block.width, height: block.height };
+      }
+      for (const link of copied.links) next = connectBlocks(next, activeFlow.id, ids.get(link.source)!, ids.get(link.target)!).workspace;
+      return { workspace: next, blockIds: [...ids.values()], pastedPositions };
+    });
+    if (!created) return;
+    setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], ...created.pastedPositions } }));
+    setSelectedBlockIds(created.blockIds); setSelectedLinkId(undefined);
   };
 
   useEffect(() => {
     const editingText = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
     const copy = (event: ClipboardEvent) => {
-      if (editingText(event.target) || selectedBlockIds.length !== 1 || !event.clipboardData) return false;
-      const block = workspace.blocks.get(selectedBlockIds[0]);
-      if (!block) return false;
-      event.clipboardData.setData(BLOCK_CLIPBOARD_TYPE, serializeCopiedBlock(block, activeFlow ? nodePositionsByFlow[activeFlow.id]?.[block.id] : undefined));
-      event.clipboardData.setData("text/plain", block.markdown || block.title || "");
+      if (transitioningRef.current || !hydratedRef.current || editingText(event.target) || !selectedBlockIds.length || !event.clipboardData || !activeFlow) return false;
+      const value = serializeCopiedBlocks(workspaceRef.current, activeFlow, selectedBlockIds, nodePositionsByFlow[activeFlow.id] ?? {});
+      const copied = parseCopiedBlocks(value);
+      if (!copied) return false;
+      event.clipboardData.setData(BLOCK_CLIPBOARD_TYPE, value);
+      event.clipboardData.setData("text/plain", copied.blocks.map(block => block.markdown || block.title).join("\n\n"));
       event.preventDefault();
       return true;
     };
     const onCopy = (event: ClipboardEvent) => { copy(event); };
     const onCut = (event: ClipboardEvent) => {
-      const blockId = selectedBlockIds[0];
-      if (blockId && copy(event)) deleteSelectedBlock(blockId);
+      if (copy(event)) deleteSelectedBlocks(selectedBlockIds);
     };
     const onPaste = (event: ClipboardEvent) => {
-      if (editingText(event.target) || !event.clipboardData) return;
-      const block = parseCopiedBlock(event.clipboardData.getData(BLOCK_CLIPBOARD_TYPE));
-      if (!block) return;
-      event.preventDefault(); pasteBlock(block);
+      if (transitioningRef.current || !hydratedRef.current || !activeFlow || connection.kind !== "idle" || editingText(event.target) || !event.clipboardData) return;
+      const copied = parseCopiedBlocks(event.clipboardData.getData(BLOCK_CLIPBOARD_TYPE));
+      if (!copied) return;
+      event.preventDefault(); pasteBlocks(copied);
     };
     window.addEventListener("copy", onCopy); window.addEventListener("cut", onCut); window.addEventListener("paste", onPaste);
     return () => { window.removeEventListener("copy", onCopy); window.removeEventListener("cut", onCut); window.removeEventListener("paste", onPaste); };
