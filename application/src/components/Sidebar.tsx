@@ -12,12 +12,13 @@ type SidebarProps = {
   onDeleteFlow: (flowId: FlowId) => void;
   onReturnToWorkspaceSelection?: () => void;
   onChooseWorkspace?: () => void;
+  onAddWorkspace?: () => void;
 };
 
 const getNodeCount = (flow: Flow) =>
   flow.blockIds.length;
 
-export function Sidebar({ collapsed = false, flows, activeFlowId, validationErrors, workspaceRoot, onCreateFlow, onSelectFlow, onDeleteFlow, onReturnToWorkspaceSelection ,onChooseWorkspace}: SidebarProps) {
+export function Sidebar({ collapsed = false, flows, activeFlowId, validationErrors, workspaceRoot, onCreateFlow, onSelectFlow, onDeleteFlow, onReturnToWorkspaceSelection, onChooseWorkspace, onAddWorkspace }: SidebarProps) {
   const [newFlowTitle, setNewFlowTitle] = useState("");
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -56,7 +57,10 @@ export function Sidebar({ collapsed = false, flows, activeFlowId, validationErro
             <p className="section-label">WORKSPACE</p>
             <p className="workspace-path" title={workspaceRoot}>{workspaceRoot}</p>
             
-            <button className="button workspace-select-button" type="button" onClick={onChooseWorkspace}>작업공간 선택하기</button>
+            <div className="workspace-buttons">
+              <button className="button workspace-select-button" type="button" onClick={onChooseWorkspace}>작업공간 선택하기</button>
+              <button className="button workspace-add-button" type="button" onClick={onAddWorkspace}>작업공간 추가하기</button>
+            </div>
           </section>
         )}
       <div className={`validation-panel ${validationErrors.length ? "has-errors" : ""}`}>

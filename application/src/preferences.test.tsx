@@ -16,7 +16,7 @@ vi.mock("./storage/repository", async importOriginal => ({ ...await importOrigin
 it("shows recent folders without opening automatically and restores folder preferences before saving", async () => {
   vi.useFakeTimers();
   let resolve!: (value: unknown) => void;
-  mocks.invoke.mockImplementation((command: string, args?: { opened?: string }) => command === "recent_workspaces" ? (args?.opened ? Promise.resolve(["D:/notes"]) : new Promise(r => { resolve = r; })) : Promise.resolve(command === "load_workspace_preferences" ? { sidebarWidth: 360 } : undefined));
+  mocks.invoke.mockImplementation((command: string, args?: { opened?: string; workspaceRoot?: string }) => command === "recent_workspaces" ? (args?.opened ? Promise.resolve(["D:/notes"]) : new Promise(r => { resolve = r; })) : Promise.resolve(command === "resolve_workspace_root" ? args?.workspaceRoot : command === "load_workspace_preferences" ? { sidebarWidth: 360 } : undefined));
   mocks.open.mockResolvedValue({ workspaceRoot: "D:/notes", workspace: createWorkspace(), nodePositionsByFlow: {} });
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);

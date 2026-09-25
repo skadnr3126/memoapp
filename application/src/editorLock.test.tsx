@@ -8,15 +8,17 @@ import { createBlock, createFlow, createWorkspace } from "./domain/flow";
 import { EDITOR_CLEAR, EDITOR_LOAD, EDITOR_LOCK, EDITOR_LOCKED, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED, type EditorSession } from "./editorProtocol";
 
 const mocks = vi.hoisted(() => ({
+  flush: vi.fn().mockResolvedValue(undefined), save: vi.fn().mockResolvedValue(undefined), choose: vi.fn().mockResolvedValue("D:/other"),
   handlers: new Map<string, (event: { payload: any }) => void>(),
   emit: vi.fn().mockResolvedValue(undefined), open: vi.fn(), focus: vi.fn().mockResolvedValue(undefined),
   canvas: vi.fn<(props: ComponentProps<typeof FlowCanvas>) => null>(() => null),
 }));
 vi.mock("@tauri-apps/api/event", () => ({ emitTo: mocks.emit, listen: vi.fn(async (name, handler) => { mocks.handlers.set(name, handler); return () => mocks.handlers.delete(name); }) }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command) => command === "recent_workspaces" ? ["D:/notes"] : {}) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command, args) => command === "recent_workspaces" ? ["D:/notes"] : command === "resolve_workspace_root" ? args.workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase().replace(/^d:/, "D:") : {}) }));
 vi.mock("@tauri-apps/api/webviewWindow", () => ({ WebviewWindow: { getByLabel: vi.fn(async () => ({ setFocus: mocks.focus })) } }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ onCloseRequested: async () => () => {} }) }));
-vi.mock("./storage/repository", async importOriginal => ({ ...await importOriginal<object>(), isDesktopRuntime: () => true, openNativeWorkspace: mocks.open, chooseNativeWorkspace: vi.fn().mockResolvedValue("D:/other"), saveNativeWorkspace: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("./storage/repository", async importOriginal => ({ ...await importOriginal<object>(), isDesktopRuntime: () => true, openNativeWorkspace: mocks.open, chooseNativeWorkspace: mocks.choose, saveNativeWorkspace: mocks.save }));
+vi.mock("./flowSummary", async original => ({ ...await original<object>(), flushEditor: mocks.flush }));
 vi.mock("./components/FlowCanvas", () => ({ FlowCanvas: mocks.canvas }));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root, a: string, b: string;
@@ -27,6 +29,7 @@ const session = () => last(loads())[2] as EditorSession;
 const receive = async (name: string, payload?: unknown) => { await act(async () => mocks.handlers.get(name)!({ payload })); };
 const open = async (id: string) => { await act(async () => canvas().onOpenBlock(id)); };
 beforeEach(async () => {
+  mocks.flush.mockReset().mockResolvedValue(undefined); mocks.save.mockReset().mockResolvedValue(undefined); mocks.choose.mockReset().mockResolvedValue("D:/other"); mocks.open.mockReset();
   vi.useFakeTimers(); mocks.handlers.clear(); mocks.emit.mockClear(); mocks.canvas.mockClear(); mocks.focus.mockClear();
   const flow = createFlow(createWorkspace());
   const first = createBlock(flow.workspace, flow.flowId); a = first.blockId;
@@ -112,4 +115,113 @@ it("clears the pinned session when changing workspaces", async () => {
   await receive(EDITOR_LOCK, { sessionId: pinned.sessionId, locked: true });
   await open(a);
   expect(session().blockId).toBe(a);
+});
+
+const click = async (selector: string) => {
+  await act(async () => host.querySelector<HTMLButtonElement>(selector)!.click());
+};
+const tabs = () => host.querySelectorAll(".workspace-tab");
+const addOther = async () => {
+  // Deliberately share all IDs, as with a copied workspace directory.
+  mocks.open.mockResolvedValue({ workspaceRoot: "D:/other", workspace: canvas().workspace, nodePositionsByFlow: {} });
+  await click(".workspace-add-button");
+};
+
+it("keeps tab content, geometry and undo isolated even when block IDs match", async () => {
+  await act(async () => canvas().onRenameBlock(a, "A title"));
+  await act(async () => canvas().onNodePositionsChange({ [a]: { x: 42, y: 84 } }));
+  await addOther();
+  expect(tabs()).toHaveLength(2);
+  await act(async () => canvas().onRenameBlock(a, "B title"));
+  await click('.workspace-tab button[title="D:/notes"]');
+  expect(canvas().workspace.blocks.get(a)?.title).toBe("A title");
+  expect(canvas().nodePositions[a]).toEqual({ x: 42, y: 84 });
+  await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true })));
+  expect(canvas().workspace.blocks.get(a)?.title).toBe("");
+  await click('.workspace-tab button[title="D:/other"]');
+  expect(canvas().workspace.blocks.get(a)?.title).toBe("B title");
+  expect(mocks.open).toHaveBeenCalledTimes(2);
+});
+
+it("deduplicates canonical paths and selects the existing tab without replacing either tab", async () => {
+  await addOther();
+  mocks.choose.mockResolvedValue("D:/NOTES/");
+  await click(".workspace-add-button");
+  expect(tabs()).toHaveLength(2);
+  expect(host.querySelector('[aria-current="page"]')?.getAttribute("title")).toBe("D:/notes");
+  await click(".workspace-select-button");
+  expect(tabs()).toHaveLength(2);
+  expect(mocks.open).toHaveBeenCalledTimes(2);
+});
+
+it("flushes editor changes before saving and rejects a late save from the previous workspace", async () => {
+  const previous = session();
+  mocks.flush.mockImplementationOnce(async () => {
+    mocks.handlers.get(EDITOR_SAVE)!({ payload: { ...previous, markdown: "last draft" } });
+  });
+  await addOther();
+  expect(mocks.save.mock.calls.some(([path, workspace]) => path === "D:/notes" && workspace.blocks.get(a)?.markdown === "last draft")).toBe(true);
+  await receive(EDITOR_SAVE, { ...previous, markdown: "late draft" });
+  expect(last(mocks.emit.mock.calls.filter(call => call[1] === EDITOR_SAVED))[2]).toHaveProperty("error");
+  await click('.workspace-tab button[title="D:/notes"]');
+  expect(canvas().workspace.blocks.get(a)?.markdown).toBe("last draft");
+});
+
+it("preserves the active workspace on flush, disk-save and folder-open failures", async () => {
+  mocks.flush.mockRejectedValueOnce(new Error("flush failed"));
+  await click(".workspace-add-button");
+  expect(tabs()).toHaveLength(1);
+  expect(host.textContent).toContain("flush failed");
+  mocks.save.mockRejectedValueOnce(new Error("disk full"));
+  await click(".workspace-add-button");
+  expect(tabs()).toHaveLength(1);
+  expect(host.textContent).toContain("disk full");
+  mocks.open.mockRejectedValueOnce(new Error("invalid JSON"));
+  await click(".workspace-add-button");
+  expect(tabs()).toHaveLength(1);
+  expect(host.textContent).toContain("invalid JSON");
+  expect(canvas().workspace.blocks.has(a)).toBe(true);
+  await open(a);
+  await receive(EDITOR_SAVE, { ...session(), markdown: "still editable" });
+  expect(canvas().workspace.blocks.get(a)?.markdown).toBe("still editable");
+});
+
+it("cancels without changing tabs and prevents duplicate folder dialogs", async () => {
+  let finish!: (path: undefined) => void;
+  mocks.choose.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await act(async () => {
+    host.querySelector<HTMLButtonElement>(".workspace-add-button")!.click();
+    host.querySelector<HTMLButtonElement>(".workspace-add-button")!.click();
+  });
+  expect(mocks.choose).toHaveBeenCalledTimes(1);
+  await act(async () => finish(undefined));
+  expect(tabs()).toHaveLength(1);
+});
+
+it("saves again when the editor changes while the disk write is pending", async () => {
+  const previous = session();
+  mocks.save.mockImplementationOnce(async () => {
+    mocks.handlers.get(EDITOR_SAVE)!({ payload: { ...previous, markdown: "during write" } });
+  });
+  await addOther();
+  const writes = mocks.save.mock.calls.filter(([path]) => path === "D:/notes");
+  expect(writes.length).toBeGreaterThanOrEqual(2);
+  expect(last(writes)[1].blocks.get(a)?.markdown).toBe("during write");
+  await click('.workspace-tab button[title="D:/notes"]');
+  expect(canvas().workspace.blocks.get(a)?.markdown).toBe("during write");
+});
+
+it("replaces only the selected tab and closes tabs without deleting their data", async () => {
+  await addOther();
+  mocks.choose.mockResolvedValue("D:/third");
+  mocks.open.mockResolvedValue({ workspaceRoot: "D:/third", workspace: canvas().workspace, nodePositionsByFlow: {} });
+  await click(".workspace-select-button");
+  expect(tabs()).toHaveLength(2);
+  expect(host.querySelector('button[title="D:/other"]')).toBeNull();
+  await click('.workspace-tab:has(button[title="D:/third"]) .workspace-tab-close');
+  expect(tabs()).toHaveLength(1);
+  expect(host.querySelector('[aria-current="page"]')?.getAttribute("title")).toBe("D:/notes");
+  await click(".workspace-tab-close");
+  expect(tabs()).toHaveLength(0);
+  expect(host.querySelector(".workspace-picker-button")).not.toBeNull();
 });

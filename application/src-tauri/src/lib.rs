@@ -224,6 +224,13 @@ fn backup(memo: &Path) -> Result<String, String> {
     Ok(name)
 }
 #[tauri::command]
+fn resolve_workspace_root(workspace_root: String) -> Result<String, String> {
+    let path = Path::new(&workspace_root);
+    if !path.is_absolute() || !path.is_dir() { return Err("작업공간 폴더가 존재하지 않습니다.".into()); }
+    path.canonicalize().map(|root| root.to_string_lossy().into_owned())
+        .map_err(|e| io_error("경로 확인 실패", e))
+}
+#[tauri::command]
 fn open_workspace(workspace_root: String) -> Result<LoadedWorkspace, String> {
     if !Path::new(&workspace_root).is_dir() { return Err("작업공간 폴더가 존재하지 않습니다.".into()); }
     let _lock = STORAGE_LOCK.lock().map_err(|_| "저장 잠금 오류")?;
@@ -338,6 +345,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_workspace,
+            resolve_workspace_root,
             save_workspace_snapshot,
             migrate_workspace,
             save_ui_preferences,
@@ -358,6 +366,20 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn workspace_identity_resolves_aliases_without_creating_missing_folders() {
+        let temp = Temp::new();
+        let root = temp.0.join("Workspace");
+        fs::create_dir(&root).unwrap();
+        let canonical = resolve_workspace_root(root.to_string_lossy().into()).unwrap();
+        assert_eq!(resolve_workspace_root(root.join(".").to_string_lossy().into()).unwrap(), canonical);
+        #[cfg(windows)]
+        assert_eq!(resolve_workspace_root(root.to_string_lossy().to_lowercase()).unwrap(), canonical);
+        let missing = root.join("missing");
+        assert!(resolve_workspace_root(missing.to_string_lossy().into()).is_err());
+        assert!(!missing.exists());
+        assert!(resolve_workspace_root("relative".into()).is_err());
+    }
     #[test]
     #[cfg(windows)]
     fn codex_terminal_keeps_workspace_path_out_of_shell_command() {

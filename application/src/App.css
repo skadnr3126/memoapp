@@ -18,6 +18,16 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 
 .app-shell { display: grid; grid-template-columns: var(--sidebar-width, 292px) 6px minmax(0, 1fr); min-height: 100vh; }
 .app-shell.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
+.app-shell:has(> .workspace-tabs) { grid-template-rows: 42px minmax(0, 1fr); }
+.workspace-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 5px 8px; background: #1d2a25; }
+.app-shell > .workspace-tabs { grid-column: 1 / -1; }
+.workspace-tab { display: flex; flex: none; max-width: 260px; }
+.workspace-tab > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-tab [aria-current="page"] { color: white; background: #347a4a; }
+.workspace-tab-close { flex: none; }
+.workspace-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.workspace-buttons .button { padding: 7px 3px; font-size: .68rem; }
+.app-shell:has(> .workspace-tabs) .flow-canvas-scroll { height: calc(100vh - 114px); }
 .sidebar[hidden], .sidebar-resizer[hidden] { display: none; }
 .sidebar-toggle { display: inline-flex; align-items: center; justify-content: center; flex: none; padding: 6px; }
 .sidebar-toggle:focus-visible { outline: 2px solid #5e9c6c; outline-offset: 2px; }

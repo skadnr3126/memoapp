@@ -41,6 +41,15 @@ import { FlowSummary } from "./components/FlowSummary";
 import { flowSummaryInput, flushEditor } from "./flowSummary";
 import { BLOCK_CLIPBOARD_TYPE, parseCopiedBlock, serializeCopiedBlock, type CopiedBlock } from "./blockClipboard";
 
+type OpenWorkspace = {
+  workspaceRoot: string;
+  workspace: WorkspaceState;
+  nodePositionsByFlow: NodePositionsByFlow;
+  sidebarWidth: number;
+  sidebarCollapsed: boolean;
+  undo?: { workspace: WorkspaceState; positions: NodePositionsByFlow };
+};
+
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => createWorkspace());
   const [message, setMessage] = useState("새 Flow를 만들어 구조를 시작하세요.");
@@ -50,6 +59,9 @@ function App() {
   const [selectedLinkId, setSelectedLinkId] = useState<string>();
   const workspaceSessionRef = useRef(crypto.randomUUID());
   const [workspaceRoot, setWorkspaceRoot] = useState<string>();
+  const [openWorkspaces, setOpenWorkspaces] = useState<OpenWorkspace[]>([]);
+  const choosingRef = useRef(false);
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [storageState, setStorageState] = useState<"checking" | "needs-workspace" | "loading" | "ready" | "error">("checking");
   const [storageError, setStorageError] = useState<string>();
   const [sidebarWidth, setSidebarWidth] = useState(292);
@@ -100,8 +112,6 @@ function App() {
       throw error;
     }
   };
-  const flushRef = useRef(saveCurrent);
-  flushRef.current = saveCurrent;
   const clearEditor = () => {
     editorLockedRef.current = false;
     issuedEditorSessionsRef.current.clear();
@@ -181,64 +191,131 @@ function App() {
     }
   };
 
-  const openWorkspace = async (path: string) => {
+  // Inactive tabs are saved snapshots; only the active tab accepts edits.
+  const preserveCurrentWorkspace = async () => {
+    await editorOpeningRef.current;
+    let saved;
+    do {
+      if (editorSessionRef.current && await WebviewWindow.getByLabel("editor")) await flushEditor();
+      saved = await saveCurrent();
+    } while (saved && saved.workspace !== workspaceRef.current);
+    clearEditor();
+    await savePreferencesRef.current();
+    const root = latestRef.current.workspaceRoot;
+    if (!root) return openWorkspaces;
+    const snapshot: OpenWorkspace = {
+      workspaceRoot: root, workspace: workspaceRef.current,
+      nodePositionsByFlow: latestRef.current.nodePositionsByFlow,
+      sidebarWidth, sidebarCollapsed, undo: undoRef.current,
+    };
+    const tabs = openWorkspaces.map(tab => tab.workspaceRoot === root ? snapshot : tab);
+    setOpenWorkspaces(tabs);
+    return tabs;
+  };
+  const preserveWorkspaceRef = useRef(preserveCurrentWorkspace);
+  preserveWorkspaceRef.current = preserveCurrentWorkspace;
+
+  const activateWorkspace = (tab: OpenWorkspace) => {
+    clearEditor(); resetInteraction();
+    pointerBlockPositionRef.current = undefined;
+    workspaceSessionRef.current = crypto.randomUUID();
+    workspaceRef.current = tab.workspace;
+    latestRef.current = tab;
+    undoRef.current = tab.undo;
+    savedStateRef.current = { workspace: tab.workspace, positions: tab.nodePositionsByFlow };
+    setWorkspace(tab.workspace);
+    setNodePositionsByFlow(tab.nodePositionsByFlow);
+    setWorkspaceRoot(tab.workspaceRoot);
+    setSidebarWidth(tab.sidebarWidth);
+    setSidebarCollapsed(tab.sidebarCollapsed);
+    hydratedRef.current = true;
+    setStorageState("ready");
+  };
+
+  const openWorkspace = async (path: string, add = false, closeRoot?: string) => {
     if (transitioningRef.current) return;
     transitioningRef.current = true;
-    setStorageState("loading");
-    try { await saveCurrent(); await savePreferencesRef.current(); } catch (error) { transitioningRef.current = false; setStorageState("error"); setStorageError(String(error)); return; }
-    setStorageState("loading");
+    setWorkspaceBusy(true);
     setStorageError(undefined);
-    hydratedRef.current = false;
-    clearEditor();
     try {
-      const loaded = await openNativeWorkspace(path.trim());
+      const root = await invoke<string>("resolve_workspace_root", { workspaceRoot: path });
+      if (root === latestRef.current.workspaceRoot) return;
+      const tabs = await preserveCurrentWorkspace();
+      const existing = tabs.find(tab => tab.workspaceRoot === root);
+      const loaded = existing ?? await openNativeWorkspace(root);
       const preferences = await invoke<{ sidebarWidth?: number }>("load_workspace_preferences", { workspaceRoot: loaded.workspaceRoot });
-      setSidebarWidth(clampSidebarWidth(preferences?.sidebarWidth ?? 292));
-      setSidebarCollapsed(false);
-      workspaceSessionRef.current = crypto.randomUUID();
-      clearEditor(); resetInteraction();
-      workspaceRef.current = loaded.workspace;
-      savedStateRef.current = { workspace: loaded.workspace, positions: loaded.nodePositionsByFlow };
-      setWorkspace(loaded.workspace);
-      setNodePositionsByFlow(loaded.nodePositionsByFlow);
-      setWorkspaceRoot(loaded.workspaceRoot);
-      setMessage(loaded.recoveryNotice ?? "작업공간을 열었습니다.");
-      setStorageState("ready");
-      hydratedRef.current = true;
-      try { setRecentWorkspaces(await invoke<string[]>("recent_workspaces", { opened: loaded.workspaceRoot })); }
+      const tab: OpenWorkspace = existing ?? {
+        ...loaded, sidebarWidth: clampSidebarWidth(preferences?.sidebarWidth ?? 292), sidebarCollapsed: false,
+      };
+      const next = closeRoot ? tabs.filter(item => item.workspaceRoot !== closeRoot) : tabs;
+      setOpenWorkspaces(existing ? next : add || !workspaceRoot ? [...next, tab] :
+        next.map(item => item.workspaceRoot === workspaceRoot ? tab : item));
+      activateWorkspace(tab);
+      setMessage("작업공간을 열었습니다.");
+      try { setRecentWorkspaces(await invoke<string[]>("recent_workspaces", { opened: tab.workspaceRoot })); }
       catch (error) { setStorageError(`최근 폴더 저장 실패: ${String(error)}`); }
     } catch (error) {
-      setWorkspaceRoot(undefined);
-      setStorageError(error instanceof Error ? error.message : "작업공간을 열 수 없습니다.");
-      setStorageState("error");
+      setStorageError(String(error));
+      setStorageState(latestRef.current.workspaceRoot ? "ready" : "needs-workspace");
     } finally {
       transitioningRef.current = false;
+      setWorkspaceBusy(false);
     }
   };
 
-  const chooseWorkspace = async () => {
-    setStorageError(undefined);
+  const chooseWorkspace = async (add = false) => {
+    if (choosingRef.current || transitioningRef.current) return;
+    choosingRef.current = true;
+    setWorkspaceBusy(true);
     try {
       const selected = await chooseNativeWorkspace();
-      if (!selected) return;
-      await openWorkspace(selected);
-    } catch (error) {
-      setStorageError(error instanceof Error ? error.message : "폴더 선택 창을 열 수 없습니다.");
-      setStorageState("error");
-    }
+      if (selected) await openWorkspace(selected, add);
+    } catch (error) { setStorageError(String(error)); }
+    finally { choosingRef.current = false; setWorkspaceBusy(false); }
   };
 
-  const returnToWorkspaceSelection = async () => {
+  const returnToWorkspaceSelection = async (close = false) => {
     if (transitioningRef.current) return;
     transitioningRef.current = true;
-    try { await saveCurrent(); await savePreferencesRef.current(); } catch (error) { transitioningRef.current = false; setStorageError(String(error)); return; }
-    hydratedRef.current = false;
-    clearEditor(); resetInteraction();
-    setWorkspaceRoot(undefined);
-    setStorageError(undefined);
-    setStorageState("needs-workspace");
-    transitioningRef.current = false;
+    setWorkspaceBusy(true);
+    try {
+      const tabs = await preserveCurrentWorkspace();
+      if (close) setOpenWorkspaces(tabs.filter(tab => tab.workspaceRoot !== workspaceRoot));
+      hydratedRef.current = false;
+      clearEditor(); resetInteraction();
+      workspaceSessionRef.current = crypto.randomUUID();
+      undoRef.current = undefined;
+      latestRef.current = { ...latestRef.current, workspaceRoot: undefined };
+      setWorkspaceRoot(undefined);
+      setStorageError(undefined);
+      setStorageState("needs-workspace");
+    } catch (error) { setStorageError(String(error)); }
+    finally { transitioningRef.current = false; setWorkspaceBusy(false); }
   };
+
+  const closeWorkspace = async (root: string) => {
+    if (transitioningRef.current || choosingRef.current) return;
+    if (root !== workspaceRoot) {
+      setOpenWorkspaces(tabs => tabs.filter(tab => tab.workspaceRoot !== root));
+      return;
+    }
+    const other = openWorkspaces.find(tab => tab.workspaceRoot !== root);
+    if (other) await openWorkspace(other.workspaceRoot, true, root);
+    else await returnToWorkspaceSelection(true);
+  };
+
+  const workspaceTabs = openWorkspaces.length > 0 && (
+    <nav className="workspace-tabs" aria-label="열린 작업공간">
+      {openWorkspaces.map(tab => <div className="workspace-tab" key={tab.workspaceRoot}>
+        <button type="button" className="button" aria-current={tab.workspaceRoot === workspaceRoot ? "page" : undefined}
+          title={tab.workspaceRoot} onClick={() => void openWorkspace(tab.workspaceRoot, true)}>
+          {tab.workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? tab.workspaceRoot}
+        </button>
+        <button type="button" className="button workspace-tab-close" aria-label={`${tab.workspaceRoot} 작업공간 닫기`}
+          onClick={() => void closeWorkspace(tab.workspaceRoot)}>×</button>
+      </div>)}
+    </nav>
+  );
 
   const startSidebarResize = (event: PointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -299,7 +376,7 @@ function App() {
     let disposed = false;
     void listen<EditorSaveRequest>(EDITOR_SAVE, ({ payload }) => {
       try {
-        if (transitioningRef.current || issuedEditorSessionsRef.current.get(payload.sessionId) !== payload.blockId || payload.workspaceSession !== workspaceSessionRef.current) throw new Error("만료된 편집 세션입니다. 블록을 다시 선택하세요.");
+        if (issuedEditorSessionsRef.current.get(payload.sessionId) !== payload.blockId || payload.workspaceSession !== workspaceSessionRef.current) throw new Error("만료된 편집 세션입니다. 블록을 다시 선택하세요.");
         const result = updateBlock(workspaceRef.current, payload.blockId, {
           title: workspaceRef.current.blocks.get(payload.blockId)?.title,
           markdown: payload.markdown,
@@ -407,11 +484,8 @@ function App() {
       closing = true;
       transitioningRef.current = true;
       try {
-        await editorOpeningRef.current?.catch(() => undefined);
+        await preserveWorkspaceRef.current();
         const editor = await WebviewWindow.getByLabel("editor");
-        if (editor) await flushEditor();
-        await flushRef.current();
-        await savePreferencesRef.current();
         await editor?.destroy();
         await getCurrentWindow().destroy();
       }
@@ -429,7 +503,7 @@ function App() {
   }, [workspace, connection]);
 
   const runCommand = <T extends CommandResult>(label: string, operation: (current: WorkspaceState) => T): T | undefined => {
-    if (transitioningRef.current) return undefined;
+    if (transitioningRef.current || !hydratedRef.current) return undefined;
     try {
       const result = operation(workspaceRef.current);
       const errors = validateWorkspace(result.workspace);
@@ -446,6 +520,7 @@ function App() {
   };
 
   const openBlockEditor = (blockId: BlockId, focus = false) => {
+    if (transitioningRef.current) return;
     const source = workspace;
     const block = source.blocks.get(blockId);
     if (!block) return;
@@ -617,13 +692,14 @@ function App() {
     }
   };
 
-  if (transitioningRef.current || storageState === "checking" || storageState === "loading") {
+  if (storageState === "checking" || storageState === "loading") {
     return <main className="workspace-setup"><p className="eyebrow">FLOW MEMO</p><h2>작업공간을 여는 중입니다.</h2><p>저장된 Flow와 Block을 안전하게 불러오고 있습니다.</p></main>;
   }
 
   if (storageState === "needs-workspace" || (!workspaceRoot && storageState === "error")) {
     return (
-      <main className="workspace-setup">
+      <main className="workspace-setup" inert={workspaceBusy} aria-busy={workspaceBusy}>
+        {workspaceTabs}
         <p className="eyebrow">FLOW MEMO · LOCAL FILES</p>
         <h2>생각을 저장할 폴더를 선택하세요.</h2>
         <p>선택한 폴더 안에 <code>.memo</code> 작업공간을 만들고, Block과 Flow를 파일로 저장합니다.</p>
@@ -643,8 +719,9 @@ function App() {
   }
 
   return (
-    <main className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`} style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
-      <Sidebar
+    <main inert={workspaceBusy} aria-busy={workspaceBusy} className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`} style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+      {workspaceTabs}
+      <Sidebar key={workspaceRoot}
         collapsed={sidebarCollapsed}
         flows={[...workspace.flows.values()]}
         activeFlowId={activeFlow?.id}
@@ -659,7 +736,8 @@ function App() {
         }}
         onDeleteFlow={deleteSelectedFlow}
         onReturnToWorkspaceSelection={() => void returnToWorkspaceSelection()}
-        onChooseWorkspace={chooseWorkspace}
+        onChooseWorkspace={() => void chooseWorkspace()}
+        onAddWorkspace={() => void chooseWorkspace(true)}
       />
       <div
         hidden={sidebarCollapsed}
@@ -675,6 +753,7 @@ function App() {
         onKeyDown={resizeSidebarWithKeyboard}
       />
       <section className="workspace">
+        {storageError && !activeFlow && <p className="storage-error" role="alert">{storageError}</p>}
             <header className="workspace-header">
               <div className="workspace-title-row">
                 <button className="button button-quiet sidebar-toggle" type="button"
@@ -702,7 +781,7 @@ function App() {
             <div className="visually-hidden" role="status">{message}</div>
             {storageError && <div className="storage-error" role="alert">{storageError} <button className="storage-retry" type="button" onClick={() => void retrySave()}>다시 시도</button></div>}
             <div className="flow-work-area">
-              <FlowCanvas key={activeFlow.id}
+              <FlowCanvas key={`${workspaceRoot}:${activeFlow.id}`}
                 onCreateBlock={addBlock}
                 onPointerBlockPositionChange={(position) => { pointerBlockPositionRef.current = position; }}
                 onDeleteBlock={deleteSelectedBlock}
