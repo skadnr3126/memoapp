@@ -68,6 +68,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
+  const [addingWorkspace, setAddingWorkspace] = useState(false);
   const preferencesRef = useRef({ sidebarWidth, workspaceRoot });
   preferencesRef.current = { sidebarWidth, workspaceRoot };
   const savePreferencesRef = useRef<() => Promise<void>>(async () => {});
@@ -239,7 +240,11 @@ function App() {
     setStorageError(undefined);
     try {
       const root = await invoke<string>("resolve_workspace_root", { workspaceRoot: path });
-      if (root === latestRef.current.workspaceRoot) return;
+      if (root === latestRef.current.workspaceRoot) {
+        setRecentWorkspaces(await invoke<string[]>("recent_workspaces", { opened: root }));
+        setAddingWorkspace(false);
+        return;
+      }
       const tabs = await preserveCurrentWorkspace();
       const existing = tabs.find(tab => tab.workspaceRoot === root);
       const loaded = existing ?? await openNativeWorkspace(root);
@@ -251,6 +256,7 @@ function App() {
       setOpenWorkspaces(existing ? next : add || !workspaceRoot ? [...next, tab] :
         next.map(item => item.workspaceRoot === workspaceRoot ? tab : item));
       activateWorkspace(tab);
+      setAddingWorkspace(false);
       setMessage("작업공간을 열었습니다.");
       try { setRecentWorkspaces(await invoke<string[]>("recent_workspaces", { opened: tab.workspaceRoot })); }
       catch (error) { setStorageError(`최근 폴더 저장 실패: ${String(error)}`); }
@@ -289,6 +295,7 @@ function App() {
       setWorkspaceRoot(undefined);
       setStorageError(undefined);
       setStorageState("needs-workspace");
+      setAddingWorkspace(false);
     } catch (error) { setStorageError(String(error)); }
     finally { transitioningRef.current = false; setWorkspaceBusy(false); }
   };
@@ -753,7 +760,7 @@ function App() {
         onDeleteFlow={deleteSelectedFlow}
         onReturnToWorkspaceSelection={() => void returnToWorkspaceSelection()}
         onChooseWorkspace={() => void chooseWorkspace()}
-        onAddWorkspace={() => void chooseWorkspace(true)}
+        onAddWorkspace={() => { setStorageError(undefined); setAddingWorkspace(true); }}
       />
       <div
         hidden={sidebarCollapsed}
@@ -769,6 +776,21 @@ function App() {
         onKeyDown={resizeSidebarWithKeyboard}
       />
       <section className="workspace">
+        {addingWorkspace && <section className="workspace-add-picker" aria-label="작업공간 추가"
+          onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") setAddingWorkspace(false); }}>
+          <h3>최근 작업공간에서 선택</h3>
+          {recentWorkspaces.length ? <ul className="recent-workspaces">
+            {recentWorkspaces.map(path => <li key={path}>
+              <button className="button" type="button" onClick={() => void openWorkspace(path, true)}>
+                {path}{openWorkspaces.some(tab => tab.workspaceRoot === path) ? " · 열려 있음" : ""}
+              </button>
+            </li>)}
+          </ul> : <p>최근 작업공간이 없습니다. 다른 폴더를 선택하세요.</p>}
+          <div className="workspace-picker-actions">
+            <button className="button button-primary workspace-other-folder" type="button" onClick={() => void chooseWorkspace(true)}>다른 폴더 선택</button>
+            <button className="button button-quiet" type="button" onClick={() => setAddingWorkspace(false)}>취소</button>
+          </div>
+        </section>}
         {storageError && !activeFlow && <p className="storage-error" role="alert">{storageError}</p>}
             <header className="workspace-header">
               <div className="workspace-title-row">

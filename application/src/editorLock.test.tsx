@@ -3,6 +3,7 @@ import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import App from "./App";
+import { invoke } from "@tauri-apps/api/core";
 import type { FlowCanvas } from "./components/FlowCanvas";
 import { BLOCK_CLIPBOARD_TYPE } from "./blockClipboard";
 import { createBlock, createFlow, createWorkspace } from "./domain/flow";
@@ -129,11 +130,38 @@ it("clears the pinned session when changing workspaces", async () => {
 const click = async (selector: string) => {
   await act(async () => host.querySelector<HTMLButtonElement>(selector)!.click());
 };
+const chooseOther = async () => {
+  await click(".workspace-add-button");
+  await click(".workspace-other-folder");
+};
 const tabs = () => host.querySelectorAll(".workspace-tab");
+it("offers recent workspaces before the folder dialog and records a selected existing workspace", async () => {
+  await click(".workspace-add-button");
+  expect(mocks.choose).not.toHaveBeenCalled();
+  expect(host.querySelector(".workspace-add-picker")?.textContent).toContain("D:/notes");
+  vi.mocked(invoke).mockClear();
+  await click(".workspace-add-picker .recent-workspaces button");
+  expect(invoke).toHaveBeenCalledWith("recent_workspaces", { opened: "D:/notes" });
+  expect(tabs()).toHaveLength(1);
+  expect(host.querySelector(".workspace-add-picker")).toBeNull();
+  expect(mocks.choose).not.toHaveBeenCalled();
+});
+
+it("records a new folder selected from the add picker and allows dismissing the picker", async () => {
+  mocks.open.mockResolvedValue({ workspaceRoot: "D:/other", workspace: canvas().workspace, nodePositionsByFlow: {} });
+  vi.mocked(invoke).mockClear();
+  await chooseOther();
+  expect(invoke).toHaveBeenCalledWith("recent_workspaces", { opened: "D:/other" });
+  expect(host.querySelector(".workspace-add-picker")).toBeNull();
+  await click(".workspace-add-button");
+  await act(async () => host.querySelector(".workspace-add-picker")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(host.querySelector(".workspace-add-picker")).toBeNull();
+  expect(tabs()).toHaveLength(2);
+});
 const addOther = async () => {
   // Deliberately share all IDs, as with a copied workspace directory.
   mocks.open.mockResolvedValue({ workspaceRoot: "D:/other", workspace: canvas().workspace, nodePositionsByFlow: {} });
-  await click(".workspace-add-button");
+  await chooseOther();
 };
 
 it("keeps tab content, geometry and undo isolated even when block IDs match", async () => {
@@ -155,7 +183,7 @@ it("keeps tab content, geometry and undo isolated even when block IDs match", as
 it("deduplicates canonical paths and selects the existing tab without replacing either tab", async () => {
   await addOther();
   mocks.choose.mockResolvedValue("D:/NOTES/");
-  await click(".workspace-add-button");
+  await chooseOther();
   expect(tabs()).toHaveLength(2);
   expect(host.querySelector('[aria-current="page"]')?.getAttribute("title")).toBe("D:/notes");
   await click(".workspace-select-button");
@@ -178,15 +206,15 @@ it("flushes editor changes before saving and rejects a late save from the previo
 
 it("preserves the active workspace on flush, disk-save and folder-open failures", async () => {
   mocks.flush.mockRejectedValueOnce(new Error("flush failed"));
-  await click(".workspace-add-button");
+  await chooseOther();
   expect(tabs()).toHaveLength(1);
   expect(host.textContent).toContain("flush failed");
   mocks.save.mockRejectedValueOnce(new Error("disk full"));
-  await click(".workspace-add-button");
+  await chooseOther();
   expect(tabs()).toHaveLength(1);
   expect(host.textContent).toContain("disk full");
   mocks.open.mockRejectedValueOnce(new Error("invalid JSON"));
-  await click(".workspace-add-button");
+  await chooseOther();
   expect(tabs()).toHaveLength(1);
   expect(host.textContent).toContain("invalid JSON");
   expect(canvas().workspace.blocks.has(a)).toBe(true);
@@ -198,9 +226,10 @@ it("preserves the active workspace on flush, disk-save and folder-open failures"
 it("cancels without changing tabs and prevents duplicate folder dialogs", async () => {
   let finish!: (path: undefined) => void;
   mocks.choose.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await click(".workspace-add-button");
   await act(async () => {
-    host.querySelector<HTMLButtonElement>(".workspace-add-button")!.click();
-    host.querySelector<HTMLButtonElement>(".workspace-add-button")!.click();
+    host.querySelector<HTMLButtonElement>(".workspace-other-folder")!.click();
+    host.querySelector<HTMLButtonElement>(".workspace-other-folder")!.click();
   });
   expect(mocks.choose).toHaveBeenCalledTimes(1);
   await act(async () => finish(undefined));

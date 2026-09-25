@@ -27,6 +27,10 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .workspace-tab-close { flex: none; }
 .workspace-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .workspace-buttons .button { padding: 7px 3px; font-size: .68rem; }
+.workspace-add-picker { margin-bottom: 12px; padding: 16px; border: 1px solid #cad9cc; border-radius: 10px; background: #fffefb; }
+.workspace-add-picker h3 { margin: 0 0 10px; font-size: .95rem; }
+.workspace-add-picker .recent-workspaces { max-height: 240px; overflow: auto; }
+.workspace-picker-actions { display: flex; gap: 8px; }
 .app-shell:has(> .workspace-tabs) .flow-canvas-scroll { height: calc(100vh - 114px); }
 .sidebar[hidden], .sidebar-resizer[hidden] { display: none; }
 .sidebar-toggle { display: inline-flex; align-items: center; justify-content: center; flex: none; padding: 6px; }

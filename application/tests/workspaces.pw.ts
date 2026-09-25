@@ -29,12 +29,15 @@ test("workspace tabs add, switch, deduplicate and close through the rendered UI"
   await page.getByRole("textbox", { name: "새 Flow", exact: true }).fill("A flow");
   await page.getByRole("button", { name: "만들기", exact: true }).click();
   await page.getByRole("button", { name: "작업공간 추가하기", exact: true }).click();
+  await expect(page.getByRole("region", { name: "작업공간 추가", exact: true })).toBeVisible();
+  await page.getByRole("region", { name: "작업공간 추가", exact: true }).getByRole("button", { name: "D:/B", exact: true }).click();
   await expect(page.locator(".workspace-tab")).toHaveCount(2);
   await page.getByRole("textbox", { name: "새 Flow", exact: true }).fill("B flow");
   await page.getByRole("button", { name: "만들기", exact: true }).click();
   await page.locator('.workspace-tab button[title="D:/A"]').click();
   await expect(page.getByRole("textbox", { name: "Flow 이름", exact: true })).toHaveValue("A flow");
   await page.getByRole("button", { name: "작업공간 추가하기", exact: true }).click();
+  await page.getByRole("button", { name: "다른 폴더 선택", exact: true }).click();
   await expect(page.locator(".workspace-tab")).toHaveCount(2);
   await expect(page.getByRole("textbox", { name: "Flow 이름", exact: true })).toHaveValue("B flow");
   await expect(page.locator(".workspace-tabs")).toBeVisible();
