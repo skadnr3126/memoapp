@@ -229,6 +229,16 @@ fn run_openrouter(key: &str, input: &str) -> Result<String, String> {
     Ok(markdown)
 }
 
+fn summary_filename(title: &str) -> String {
+    let name: String = title
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .take(80)
+        .collect();
+    let name = name.trim_matches('-');
+    if name.is_empty() { "flow".into() } else { name.into() }
+}
+
 fn summarize(workspace_root: String, input: SummaryInput) -> Result<SummaryResult, String> {
     validate(&input)?;
     let json = serde_json::to_string(&input).map_err(|e| e.to_string())?;
@@ -261,7 +271,7 @@ fn summarize(workspace_root: String, input: SummaryInput) -> Result<SummaryResul
             return Err("요약 저장 경로가 작업공간 밖입니다.".into());
         }
     }
-    let path = directory.join(format!("{}_{stamp}.md", input.id));
+    let path = directory.join(format!("{}_{stamp}.md", summary_filename(&input.title)));
     super::write_atomic(&path, &markdown)?;
     Ok(SummaryResult {
         path: path.to_string_lossy().into_owned(),
@@ -324,6 +334,12 @@ pub async fn summarize_flow(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn summary_filename_uses_a_safe_flow_title() {
+        assert_eq!(summary_filename("회의: 계획 / 결정"), "회의--계획---결정");
+        assert_eq!(summary_filename("///"), "flow");
+        assert!(summary_filename(&"가".repeat(100)).chars().count() <= 80);
+    }
     #[test]
     fn rejects_path_ids_and_missing_link_endpoints() {
         let mut input = SummaryInput {

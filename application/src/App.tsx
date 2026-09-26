@@ -213,6 +213,15 @@ function App() {
     setOpenWorkspaces(tabs);
     return tabs;
   };
+
+  const openSummaryFolder = async () => {
+    try {
+      const { workspaceRoot } = await prepareSavedWorkspace();
+      await invoke("open_summary_folder", { workspaceRoot });
+    } catch (error) {
+      setMessage(`요약 폴더 열기 실패: ${String(error)}`);
+    }
+  };
   const preserveWorkspaceRef = useRef(preserveCurrentWorkspace);
   preserveWorkspaceRef.current = preserveCurrentWorkspace;
 
@@ -811,6 +820,7 @@ function App() {
               </div>
               {activeFlow && <div className="workspace-header-actions">
                 <button className="button button-quiet editor-toggle" type="button" aria-label="Codex CLI 열기" title="Codex CLI 열기" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openCodex()}>Codex</button>
+                <button className="button button-quiet editor-toggle" type="button" aria-label="요약 폴더 열기" title="요약 폴더 열기" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openSummaryFolder()}>요약 폴더</button>
                 <button className="button button-quiet editor-toggle" type="button" aria-label="VS Code 열기" title="VS Code 열기" disabled={!isDesktopRuntime() || !workspaceRoot} onClick={() => void openCode()}>Code</button>
               </div>}
             </header>

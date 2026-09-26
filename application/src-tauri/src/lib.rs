@@ -334,6 +334,26 @@ async fn open_code(window: tauri::Window, workspace_root: String) -> Result<(), 
     Ok(())
 }
 
+#[tauri::command]
+fn open_summary_folder(window: tauri::Window, workspace_root: String) -> Result<(), String> {
+    if window.label() != "main" { return Err("메인 창에서만 실행할 수 있습니다.".into()); }
+    let root = Path::new(&workspace_root);
+    if !root.is_absolute() || !root.is_dir() { return Err("작업공간 경로가 올바르지 않습니다.".into()); }
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let mut directory = root.clone();
+    for part in [".memo", "ai", "summaries"] {
+        directory.push(part);
+        if directory.is_symlink() { return Err("요약 폴더 경로에 심볼릭 링크는 지원하지 않습니다.".into()); }
+        fs::create_dir_all(&directory).map_err(|e| format!("요약 폴더 생성 실패: {e}"))?;
+        if !directory.canonicalize().map_err(|e| e.to_string())?.starts_with(&root) {
+            return Err("요약 폴더가 작업공간 밖을 가리킵니다.".into());
+        }
+    }
+    std::process::Command::new("explorer.exe").arg(directory).spawn()
+        .map_err(|e| io_error("요약 폴더 열기 실패", e))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -357,7 +377,8 @@ pub fn run() {
             summary::save_openrouter_api_key,
             summary::summarize_flow,
             open_codex,
-            open_code
+            open_code,
+            open_summary_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
