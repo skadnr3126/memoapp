@@ -101,7 +101,7 @@ export function FlowSummary({ prepare, workspaceRoot, flowId }: { prepare: () =>
     {error && !needsKey && <p className="flow-summary-key-error" role="alert">{error}</p>}
     </div>}
     {error && !open && <p className="flow-summary-error" role="alert">요약 실패: {error}</p>}
-    {result && <details open className="flow-summary-result">
+    {result && <details className="flow-summary-result">
       <summary>요약 Markdown 보기</summary>
       <p>{result.path}</p>
       <pre>{result.markdown}</pre>
