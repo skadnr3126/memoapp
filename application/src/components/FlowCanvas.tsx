@@ -1,3 +1,4 @@
+import type { FlowViewport } from "../storage/types";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BlockId, Flow, getDisplayTitle, WorkspaceState } from "../domain/flow";
 import { ConnectionState } from "../domain/connection";
@@ -76,6 +77,8 @@ export const findDirectionalNeighbor = (
 };
 
 type FlowCanvasProps = {
+  initialViewport?: FlowViewport;
+  onViewportChange?: (view: FlowViewport) => void;
   workspace: WorkspaceState;
   flow: Flow;
   onOpenBlock: (blockId: BlockId, focus?: boolean) => void;
@@ -96,6 +99,7 @@ type FlowCanvasProps = {
 };
 
 export function FlowCanvas({
+  initialViewport, onViewportChange,
   workspace,
   flow,
   onOpenBlock,
@@ -107,9 +111,10 @@ export function FlowCanvas({
   connection, onChooseConnectionBlock, selectedLinkId, onSelectLink, onCreateBlock, onPointerBlockPositionChange, onDeleteBlock, onDeleteLink, onBeginConnection,
 }: FlowCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
+  const restoredViewportRef = useRef(false);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState(1);
-  const zoomRef = useRef(1);
+  const [zoom, setZoom] = useState(initialViewport?.zoom ?? 1);
+  const zoomRef = useRef(initialViewport?.zoom ?? 1);
   const zoomAnchorRef = useRef<{ x: number; y: number; left: number; top: number } | undefined>(undefined);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 800 });
@@ -132,6 +137,21 @@ export function FlowCanvas({
   const keepPositionsInside = (next: Record<BlockId, NodePosition>) =>
     Object.fromEntries(Object.entries(next).map(([id, point]) => [id, keepNodeInside(point)]));
   const updatePositions = (next: Record<BlockId, NodePosition>) => onNodePositionsChange(keepPositionsInside(next));
+  const reportViewport = () => {
+    const viewport = viewportRef.current;
+    if (viewport && restoredViewportRef.current) onViewportChange?.({ zoom: zoomRef.current, scrollLeft: viewport.scrollLeft, scrollTop: viewport.scrollTop });
+  };
+  useLayoutEffect(() => {
+    if (restoredViewportRef.current || !viewportSize.width || !viewportSize.height) return;
+    const viewport = viewportRef.current!;
+    viewport.scrollLeft = initialViewport?.scrollLeft ?? 0;
+    viewport.scrollTop = initialViewport?.scrollTop ?? 0;
+    setCanvasSize(current => ({
+      width: Math.max(current.width, ((initialViewport?.scrollLeft ?? 0) + viewportSize.width) / zoom),
+      height: Math.max(current.height, ((initialViewport?.scrollTop ?? 0) + viewportSize.height) / zoom),
+    }));
+    restoredViewportRef.current = true;
+  }, [viewportSize.width, viewportSize.height]);
   useLayoutEffect(() => {
     const viewport = viewportRef.current!;
     const measure = () => setViewportSize({ width: viewport.clientWidth, height: viewport.clientHeight });
@@ -166,6 +186,7 @@ export function FlowCanvas({
       viewport.scrollLeft = anchor.x * zoom - anchor.left;
       viewport.scrollTop = anchor.y * zoom - anchor.top;
       zoomAnchorRef.current = undefined;
+      reportViewport();
     }
     const pointer = mouseRef.current;
     if (pointer) onPointerBlockPositionChange?.(worldPosition(pointer.x, pointer.y));
@@ -220,8 +241,8 @@ export function FlowCanvas({
   const positions = Object.fromEntries(flow.blockIds.map((id, index) => [id, nodePositions[id] ?? defaultPosition(index)]));
   const contentWidth = Math.max(canvasSize.width, viewportSize.width, ...Object.values(positions).map(point => point.x + (point.width ?? NODE_WIDTH) + 320));
   const contentHeight = Math.max(canvasSize.height, viewportSize.height, ...Object.entries(positions).map(([id, point]) => point.y + (point.height ?? heights[id] ?? NODE_HEIGHT) + 320));
-  const width = Math.max(contentWidth, viewportSize.width / zoom);
-  const height = Math.max(contentHeight, viewportSize.height / zoom);
+  const width = Math.max(contentWidth, viewportSize.width / zoom, restoredViewportRef.current ? 0 : ((initialViewport?.scrollLeft ?? 0) + viewportSize.width) / zoom);
+  const height = Math.max(contentHeight, viewportSize.height / zoom, restoredViewportRef.current ? 0 : ((initialViewport?.scrollTop ?? 0) + viewportSize.height) / zoom);
   useLayoutEffect(() => {
     if (contentWidth > canvasSize.width || contentHeight > canvasSize.height) setCanvasSize({ width: contentWidth, height: contentHeight });
     const changed = Object.fromEntries(Object.entries(positions).filter(([, point]) => point.x < 0 || point.y < 0).map(([id, point]) => [id, keepNodeInside(point)]));
@@ -349,7 +370,7 @@ export function FlowCanvas({
     <div className="flow-canvas-scroll" ref={viewportRef} onContextMenu={(e) => e.preventDefault()}
       onPointerEnter={(e) => { mouseRef.current = { x: e.clientX, y: e.clientY }; onPointerBlockPositionChange?.(worldPosition(e.clientX, e.clientY)); }}
       onPointerLeave={() => { mouseRef.current = undefined; onPointerBlockPositionChange?.(); }}
-      onScroll={() => { setMenu(undefined); const pointer = mouseRef.current; if (pointer) onPointerBlockPositionChange?.(worldPosition(pointer.x, pointer.y)); }}
+      onScroll={() => { reportViewport(); setMenu(undefined); const pointer = mouseRef.current; if (pointer) onPointerBlockPositionChange?.(worldPosition(pointer.x, pointer.y)); }}
       onPointerDown={(e) => {
         if (e.target instanceof Element && e.target.closest(".canvas-context-menu")) return;
         if (e.button !== 2) return;

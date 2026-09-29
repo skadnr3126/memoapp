@@ -3,7 +3,7 @@ use serde_json::json;
 use std::{
     fs,
     path::PathBuf,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 const MODEL: &str = "openrouter/free";
@@ -229,14 +229,35 @@ fn run_openrouter(key: &str, input: &str) -> Result<String, String> {
     Ok(markdown)
 }
 
-fn summary_filename(title: &str) -> String {
-    let name: String = title
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
-        .take(80)
-        .collect();
-    let name = name.trim_matches('-');
-    if name.is_empty() { "flow".into() } else { name.into() }
+fn summary_path(workspace_root: &str, flow_id: &str) -> Result<PathBuf, String> {
+    if flow_id.is_empty() || !flow_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        return Err("Flow ID가 올바르지 않습니다.".into());
+    }
+    let root = PathBuf::from(workspace_root);
+    if !root.is_absolute() || !root.is_dir() { return Err("작업공간 경로가 올바르지 않습니다.".into()); }
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let mut path = root.clone();
+    for part in [".memo", "ai", "summaries"] {
+        path.push(part);
+        if path.is_symlink() { return Err("요약 경로의 심볼릭 링크는 지원하지 않습니다.".into()); }
+        if path.exists() && !path.canonicalize().map_err(|e| e.to_string())?.starts_with(&root) {
+            return Err("요약 경로가 작업공간 밖입니다.".into());
+        }
+    }
+    path.push(format!("{flow_id}.md"));
+    if path.is_symlink() { return Err("요약 파일의 심볼릭 링크는 지원하지 않습니다.".into()); }
+    Ok(path)
+}
+
+#[tauri::command]
+pub fn load_flow_summary(window: tauri::Window, workspace_root: String, flow_id: String) -> Result<Option<SummaryResult>, String> {
+    main_window(&window)?;
+    let path = summary_path(&workspace_root, &flow_id)?;
+    match fs::read_to_string(&path) {
+        Ok(markdown) => Ok(Some(SummaryResult { path: path.to_string_lossy().into_owned(), markdown })),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("요약 읽기 실패: {error}")),
+    }
 }
 
 fn summarize(workspace_root: String, input: SummaryInput) -> Result<SummaryResult, String> {
@@ -245,33 +266,10 @@ fn summarize(workspace_root: String, input: SummaryInput) -> Result<SummaryResul
     if json.len() > 2_000_000 {
         return Err("요약할 내용이 너무 큽니다. Flow를 나누어 다시 시도하세요.".into());
     }
-    let root = PathBuf::from(workspace_root);
-    if !root.is_absolute() || !root.is_dir() {
-        return Err("작업공간 경로가 올바르지 않습니다.".into());
-    }
-    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let path = summary_path(&workspace_root, &input.id)?;
     let key = read_api_key()?.ok_or("OPENROUTER_KEY_REQUIRED:OpenRouter API 키를 등록하세요.")?;
     let markdown = run_openrouter(&key, &json)?;
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_nanos();
-    let mut directory = root.clone();
-    for part in [".memo", "ai", "summaries"] {
-        directory.push(part);
-        if directory.is_symlink() {
-            return Err("요약 저장 경로의 심볼릭 링크는 지원하지 않습니다.".into());
-        }
-        fs::create_dir_all(&directory).map_err(|e| format!("요약 폴더 생성 실패: {e}"))?;
-        if !directory
-            .canonicalize()
-            .map_err(|e| e.to_string())?
-            .starts_with(&root)
-        {
-            return Err("요약 저장 경로가 작업공간 밖입니다.".into());
-        }
-    }
-    let path = directory.join(format!("{}_{stamp}.md", summary_filename(&input.title)));
+    fs::create_dir_all(path.parent().ok_or("요약 폴더가 없습니다.")?).map_err(|e| e.to_string())?;
     super::write_atomic(&path, &markdown)?;
     Ok(SummaryResult {
         path: path.to_string_lossy().into_owned(),
@@ -335,10 +333,17 @@ pub async fn summarize_flow(
 mod tests {
     use super::*;
     #[test]
-    fn summary_filename_uses_a_safe_flow_title() {
-        assert_eq!(summary_filename("회의: 계획 / 결정"), "회의--계획---결정");
-        assert_eq!(summary_filename("///"), "flow");
-        assert!(summary_filename(&"가".repeat(100)).chars().count() <= 80);
+    fn summary_overwrites_one_file_per_flow() {
+        let root = std::env::temp_dir().join(format!("memo-summary-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&root).unwrap();
+        let path = summary_path(root.to_str().unwrap(), "flow_a").unwrap();
+        super::super::write_atomic(&path, "first").unwrap();
+        super::super::write_atomic(&path, "second").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "second");
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+        assert_ne!(path, summary_path(root.to_str().unwrap(), "flow_b").unwrap());
+        assert!(summary_path(root.to_str().unwrap(), "../outside").is_err());
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn rejects_path_ids_and_missing_link_endpoints() {

@@ -6,4 +6,6 @@ export const LAYOUT_SCHEMA_VERSION = 2;
 export type PersistedFlow = { version: number; id: string; title: string; blocks: string[]; links: Link[] };
 export type PersistedWorkspace = { version: number; activeFlowId?: string };
 export type PersistedNodePosition = { x: number; y: number; width?: number; height?: number };
-export type PersistedLayout = { version: number; nodePositionsByFlow: Record<string, Record<string, PersistedNodePosition | undefined>> };
+export type FlowViewport = { zoom: number; scrollLeft: number; scrollTop: number };
+export type ViewportsByFlow = Record<string, FlowViewport | undefined>;
+export type PersistedLayout = { viewportByFlow: ViewportsByFlow; version: number; nodePositionsByFlow: Record<string, Record<string, PersistedNodePosition | undefined>> };

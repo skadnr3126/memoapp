@@ -1,3 +1,4 @@
+import type { ViewportsByFlow } from "./storage/types";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -45,6 +46,7 @@ type OpenWorkspace = {
   workspaceRoot: string;
   workspace: WorkspaceState;
   nodePositionsByFlow: NodePositionsByFlow;
+  viewportByFlow: ViewportsByFlow;
   sidebarWidth: number;
   sidebarCollapsed: boolean;
   undo?: { workspace: WorkspaceState; positions: NodePositionsByFlow };
@@ -54,6 +56,7 @@ function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => createWorkspace());
   const [message, setMessage] = useState("새 Flow를 만들어 구조를 시작하세요.");
   const [nodePositionsByFlow, setNodePositionsByFlow] = useState<NodePositionsByFlow>({});
+  const [viewportByFlow, setViewportByFlow] = useState<ViewportsByFlow>({});
   const [selectedBlockIds, setSelectedBlockIds] = useState<BlockId[]>([]);
   const [connection, setConnection] = useState<ConnectionState>({ kind: "idle" });
   const [selectedLinkId, setSelectedLinkId] = useState<string>();
@@ -89,19 +92,19 @@ function App() {
   workspaceRef.current = workspace;
   const undoRef = useRef<{ workspace: WorkspaceState; positions: NodePositionsByFlow } | undefined>(undefined);
 
-  const latestRef = useRef({ workspace, nodePositionsByFlow, workspaceRoot });
-  latestRef.current = { workspace, nodePositionsByFlow, workspaceRoot };
+  const latestRef = useRef({ workspace, nodePositionsByFlow, viewportByFlow, workspaceRoot });
+  latestRef.current = { workspace, nodePositionsByFlow, viewportByFlow, workspaceRoot };
   const saveRevisionRef = useRef(0);
-  const savedStateRef = useRef<{ workspace: WorkspaceState; positions: NodePositionsByFlow } | undefined>(undefined);
+  const savedStateRef = useRef<{ workspace: WorkspaceState; positions: NodePositionsByFlow; viewports: ViewportsByFlow } | undefined>(undefined);
   const saveCurrent = async () => {
     const current = { ...latestRef.current, workspace: workspaceRef.current };
     if (!current.workspaceRoot || !hydratedRef.current || !isDesktopRuntime()) return;
     const revision = ++saveRevisionRef.current;
-    const pending = saveSequenceRef.current.catch(() => undefined).then(() => saveNativeWorkspace(current.workspaceRoot!, current.workspace, current.nodePositionsByFlow));
+    const pending = saveSequenceRef.current.catch(() => undefined).then(() => saveNativeWorkspace(current.workspaceRoot!, current.workspace, current.nodePositionsByFlow, current.viewportByFlow));
     saveSequenceRef.current = pending;
     try {
       await pending;
-      savedStateRef.current = { workspace: current.workspace, positions: current.nodePositionsByFlow };
+      savedStateRef.current = { workspace: current.workspace, positions: current.nodePositionsByFlow, viewports: current.viewportByFlow };
       if (revision === saveRevisionRef.current && latestRef.current.workspaceRoot === current.workspaceRoot) {
         setStorageState("ready"); setStorageError(undefined);
       }
@@ -133,9 +136,7 @@ function App() {
     if (!saved || session !== workspaceSessionRef.current || root !== latestRef.current.workspaceRoot || transitioningRef.current) throw new Error("작업공간이 변경되었습니다. 다시 시도하세요.");
     return saved;
   };
-  const prepareSummary = async () => {
-    const flowId = workspaceRef.current.activeFlowId;
-    if (!flowId) throw new Error("Flow를 먼저 선택하세요.");
+  const prepareSummary = async (flowId: string) => {
     const saved = await prepareSavedWorkspace();
     return { workspaceRoot: saved.workspaceRoot!, input: flowSummaryInput(saved.workspace, flowId) };
   };
@@ -207,6 +208,7 @@ function App() {
     const snapshot: OpenWorkspace = {
       workspaceRoot: root, workspace: workspaceRef.current,
       nodePositionsByFlow: latestRef.current.nodePositionsByFlow,
+      viewportByFlow: latestRef.current.viewportByFlow,
       sidebarWidth, sidebarCollapsed, undo: undoRef.current,
     };
     const tabs = openWorkspaces.map(tab => tab.workspaceRoot === root ? snapshot : tab);
@@ -232,9 +234,10 @@ function App() {
     workspaceRef.current = tab.workspace;
     latestRef.current = tab;
     undoRef.current = tab.undo;
-    savedStateRef.current = { workspace: tab.workspace, positions: tab.nodePositionsByFlow };
+    savedStateRef.current = { workspace: tab.workspace, positions: tab.nodePositionsByFlow, viewports: tab.viewportByFlow };
     setWorkspace(tab.workspace);
     setNodePositionsByFlow(tab.nodePositionsByFlow);
+    setViewportByFlow(tab.viewportByFlow ?? {});
     setWorkspaceRoot(tab.workspaceRoot);
     setSidebarWidth(tab.sidebarWidth);
     setSidebarCollapsed(tab.sidebarCollapsed);
@@ -484,10 +487,10 @@ function App() {
 
   useEffect(() => {
     if (!workspaceRoot || !hydratedRef.current || !isDesktopRuntime()) return;
-    if (savedStateRef.current?.workspace === workspace && savedStateRef.current.positions === nodePositionsByFlow) return;
+    if (savedStateRef.current?.workspace === workspace && savedStateRef.current.positions === nodePositionsByFlow && savedStateRef.current.viewports === viewportByFlow) return;
     const timer = window.setTimeout(() => { void saveCurrent().catch(() => undefined); }, 650);
     return () => window.clearTimeout(timer);
-  }, [workspace, workspaceRoot, nodePositionsByFlow]);
+  }, [workspace, workspaceRoot, nodePositionsByFlow, viewportByFlow]);
 
   useEffect(() => {
     if (!isDesktopRuntime()) return;
@@ -815,7 +818,7 @@ function App() {
                 </button>
                 {activeFlow && <>
                 <input className="flow-title-input" value={activeFlow.title} onChange={(event) => runCommand("Flow 이름 변경", (current) => renameFlow(current, activeFlow.id, event.currentTarget.value))} aria-label="Flow 이름" />
-                <FlowSummary key={workspaceRoot} prepare={prepareSummary} />
+                <FlowSummary key={`${workspaceRoot}:${activeFlow.id}`} workspaceRoot={workspaceRoot ?? ""} flowId={activeFlow.id} prepare={() => prepareSummary(activeFlow.id)} />
                 </>}
               </div>
               {activeFlow && <div className="workspace-header-actions">
@@ -844,6 +847,8 @@ function App() {
                 onOpenBlock={openBlockEditor}
                 onRenameBlock={renameBlockTitle}
                 nodePositions={nodePositionsByFlow[activeFlow.id] ?? {}}
+                initialViewport={viewportByFlow[activeFlow.id]}
+                onViewportChange={view => setViewportByFlow(current => ({ ...current, [activeFlow.id]: view }))}
                 selectedBlockIds={selectedBlockIds}
                 onSelectedBlockIdsChange={(ids) => { setSelectedBlockIds(ids); setSelectedLinkId(undefined); }}
                 onNodePositionsChange={(positions) => setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], ...positions } }))}

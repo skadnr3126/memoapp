@@ -147,7 +147,7 @@ export const deserializeWorkspaceMetadata = (value: unknown): PersistedWorkspace
   return { version: WORKSPACE_SCHEMA_VERSION, ...(source.activeFlowId ? { activeFlowId: source.activeFlowId } : {}) };
 };
 
-export const emptyLayout = (): PersistedLayout => ({ version: LAYOUT_SCHEMA_VERSION, nodePositionsByFlow: {} });
+export const emptyLayout = (): PersistedLayout => ({ version: LAYOUT_SCHEMA_VERSION, nodePositionsByFlow: {}, viewportByFlow: {} });
 
 export const deserializeLayout = (value: unknown): PersistedLayout => {
   const source = asRecord(value, "layout.json");
@@ -169,7 +169,16 @@ export const deserializeLayout = (value: unknown): PersistedLayout => {
       }
     });
   });
-  return { version: source.version, nodePositionsByFlow };
+  const viewportByFlow: PersistedLayout["viewportByFlow"] = Object.create(null);
+  for (const [id, raw] of Object.entries(asRecord(source.viewportByFlow ?? {}, "화면 위치"))) {
+    const view = asRecord(raw, "화면 위치");
+    const { zoom, scrollLeft, scrollTop } = view;
+    if (typeof zoom !== "number" || !Number.isFinite(zoom) || zoom < 0.1 || zoom > 3 ||
+        typeof scrollLeft !== "number" || !Number.isFinite(scrollLeft) || scrollLeft < 0 ||
+        typeof scrollTop !== "number" || !Number.isFinite(scrollTop) || scrollTop < 0) throw new Error("화면 위치 형식이 올바르지 않습니다.");
+    viewportByFlow[id] = { zoom, scrollLeft, scrollTop };
+  }
+  return { version: source.version, nodePositionsByFlow, viewportByFlow };
 };
 
 export const restoreWorkspace = (

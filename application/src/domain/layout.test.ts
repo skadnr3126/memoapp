@@ -34,3 +34,10 @@ it("round-trips cleared titles, whitespace and resized geometry without reintrod
     expect(() => deserializeLayout({ version: 2, nodePositionsByFlow: { f: { b: { x: 0, y: 0, width } } } })).toThrow();
   }
 });
+
+ it("restores per-flow viewports and accepts older layouts", () => {
+   const viewportByFlow = { first: { zoom: 0.8, scrollLeft: 230, scrollTop: 140 }, second: { zoom: 1.5, scrollLeft: 0, scrollTop: 50 } };
+   expect(deserializeLayout(JSON.parse(JSON.stringify({ version: 2, nodePositionsByFlow: {}, viewportByFlow }))).viewportByFlow).toEqual(viewportByFlow);
+   expect(deserializeLayout({ version: 2, nodePositionsByFlow: {} }).viewportByFlow).toEqual({});
+   expect(() => deserializeLayout({ version: 2, nodePositionsByFlow: {}, viewportByFlow: { bad: { zoom: 0, scrollLeft: 0, scrollTop: 0 } } })).toThrow();
+ });

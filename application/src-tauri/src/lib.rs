@@ -376,6 +376,7 @@ pub fn run() {
             summary::delete_openrouter_api_key,
             summary::save_openrouter_api_key,
             summary::summarize_flow,
+            summary::load_flow_summary,
             open_codex,
             open_code,
             open_summary_folder

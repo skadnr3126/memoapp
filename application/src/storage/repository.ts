@@ -13,7 +13,7 @@ import {
   serializeFlow,
   serializeWorkspaceMetadata,
 } from "./serialization";
-import { PersistedLayout, PersistedNodePosition } from "./types";
+import { PersistedLayout, PersistedNodePosition, ViewportsByFlow } from "./types";
 
 export type NodePositionsByFlow = Record<string, Record<BlockId, PersistedNodePosition | undefined>>;
 
@@ -42,6 +42,7 @@ export type LoadedWorkspaceState = {
   workspaceRoot: string;
   workspace: WorkspaceState;
   nodePositionsByFlow: NodePositionsByFlow;
+  viewportByFlow: ViewportsByFlow;
   recoveryNotice?: string;
 };
 
@@ -86,10 +87,10 @@ const cleanLayout = (layout: PersistedLayout, workspace: WorkspaceState): NodePo
   return result;
 };
 
-export const snapshotFor = (workspace: WorkspaceState, nodePositionsByFlow: NodePositionsByFlow): WorkspaceSnapshot => {
+export const snapshotFor = (workspace: WorkspaceState, nodePositionsByFlow: NodePositionsByFlow, viewportByFlow: ViewportsByFlow = {}): WorkspaceSnapshot => {
   const errors = validateWorkspace(workspace);
   if (errors.length) throw new Error(errors.join(" "));
-  const layout = deserializeLayout({ version: 2, nodePositionsByFlow });
+  const layout = deserializeLayout({ version: 2, nodePositionsByFlow, viewportByFlow: Object.fromEntries(Object.entries(viewportByFlow).filter(([id]) => workspace.flows.has(id))) });
   layout.nodePositionsByFlow = cleanLayout(layout, workspace);
   return {
     blockFiles: [...workspace.blocks.values()].map((block) => ({
@@ -132,18 +133,18 @@ export const decodeWorkspace = (loaded: LoadedWorkspace): LoadedWorkspaceState &
     }]));
   }
   return { workspaceRoot: loaded.workspaceRoot, workspace, nodePositionsByFlow: cleanLayout(layout, workspace),
-    recoveryNotice: loaded.recoveryNotice, needsMigration: legacy.length > 0 || layout.version === 1 };
+    viewportByFlow: layout.viewportByFlow, recoveryNotice: loaded.recoveryNotice, needsMigration: legacy.length > 0 || layout.version === 1 };
 };
 export const openNativeWorkspace = async (workspaceRoot: string): Promise<LoadedWorkspaceState> => {
   if (!isDesktopRuntime()) throw new Error("파일 저장은 데스크톱 앱에서만 사용할 수 있습니다.");
   const loaded = await invoke<LoadedWorkspace>("open_workspace", { workspaceRoot });
   const decoded = decodeWorkspace(loaded);
   if (decoded.needsMigration) {
-    await invoke("migrate_workspace", { workspaceRoot, snapshot: snapshotFor(decoded.workspace, decoded.nodePositionsByFlow) });
+    await invoke("migrate_workspace", { workspaceRoot, snapshot: snapshotFor(decoded.workspace, decoded.nodePositionsByFlow, decoded.viewportByFlow) });
     const verified = decodeWorkspace(await invoke<LoadedWorkspace>("open_workspace", { workspaceRoot }));
     if (verified.needsMigration) throw new Error("변환 결과를 확인할 수 없습니다.");
-    const expected = snapshotFor(decoded.workspace, decoded.nodePositionsByFlow);
-    const actual = snapshotFor(verified.workspace, verified.nodePositionsByFlow);
+    const expected = snapshotFor(decoded.workspace, decoded.nodePositionsByFlow, decoded.viewportByFlow);
+    const actual = snapshotFor(verified.workspace, verified.nodePositionsByFlow, verified.viewportByFlow);
     if (JSON.stringify(expected) !== JSON.stringify(actual)) throw new Error("변환 후 데이터가 원래 내용과 일치하지 않습니다. .memo/backups를 확인하세요.");
     return { ...verified, recoveryNotice: "기존 블록과 연결을 변환했습니다. 원본은 .memo/backups에 보관했습니다." };
   }
@@ -154,7 +155,8 @@ export const saveNativeWorkspace = async (
   workspaceRoot: string,
   workspace: WorkspaceState,
   nodePositionsByFlow: NodePositionsByFlow,
+  viewportByFlow: ViewportsByFlow = {},
 ): Promise<void> => {
   if (!isDesktopRuntime()) return;
-  await invoke("save_workspace_snapshot", { workspaceRoot, snapshot: snapshotFor(workspace, nodePositionsByFlow) });
+  await invoke("save_workspace_snapshot", { workspaceRoot, snapshot: snapshotFor(workspace, nodePositionsByFlow, viewportByFlow) });
 };
