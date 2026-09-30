@@ -464,10 +464,11 @@ export function FlowCanvas({
                   return;
                 }
                 if (e.repeat) return;
-                if (e.key === "Enter" || e.key === " ") {
+                const editShortcut = !linking && e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && !e.nativeEvent.isComposing && e.key.toLowerCase() === "f";
+                if (e.key === "Enter" || e.key === " " || editShortcut) {
                   if (connection.kind === "ready" && e.key === "Enter") return;
                   e.preventDefault(); e.stopPropagation(); activate(blockId);
-                  if (!linking && e.key === "Enter") { setSummaryDraft(block.title ?? ""); setEditingId(blockId); }
+                  if (!linking && (e.key === "Enter" || editShortcut)) { setSummaryDraft(block.title ?? ""); setEditingId(blockId); }
                 }
               }}
               onPointerDown={(e) => {

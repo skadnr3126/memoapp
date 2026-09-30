@@ -30,6 +30,26 @@ const pointer = (element: Element, type: string, x: number, y: number, button = 
   element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button }));
 });
 describe("summary editing", () => {
+  it("edits the focused node with Ctrl+F and leaves other shortcuts alone", () => {
+    click(nodes()[0]);
+    for (const extra of [{ repeat: true }, { shiftKey: true }, { altKey: true }, { metaKey: true }, { isComposing: true }]) {
+      key(nodes()[0], "f", { ctrlKey: true, ...extra });
+      expect(host.querySelector(".node-summary-input")).toBeNull();
+    }
+    const shortcut = new KeyboardEvent("keydown", { key: "F", ctrlKey: true, bubbles: true, cancelable: true });
+    act(() => { nodes()[0].dispatchEvent(shortcut); });
+    const field = host.querySelector<HTMLTextAreaElement>(".node-summary-input")!;
+    expect(shortcut.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(field);
+    expect(nodes()[0].contains(field)).toBe(true);
+    const typing = new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true, cancelable: true });
+    act(() => { field.dispatchEvent(typing); });
+    expect(typing.defaultPrevented).toBe(false);
+    key(field, "Escape");
+    beginLink();
+    key(nodes()[0], "f", { ctrlKey: true });
+    expect(host.querySelector(".node-summary-input")).toBeNull();
+  });
   it("places the caret after the existing summary for Enter and double-click editing", () => {
     click(nodes()[0]);
     key(nodes()[0], "Enter");
