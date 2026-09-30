@@ -638,7 +638,9 @@ function App() {
     const { positions, preferred } = newBlockPlacement(activeFlow);
     const pointer = pointerBlockPositionRef.current;
     const anchor = pointer ? centerNodeAt({ ...pointer, width, height }) : preferred;
-    const point = findFreePosition(positions, { x: Math.max(0, anchor.x), y: Math.max(0, anchor.y), width, height });
+    const point = pointer
+      ? { x: Math.max(0, anchor.x), y: Math.max(0, anchor.y) }
+      : findFreePosition(positions, { ...anchor, width, height });
     const created = runCommand("블록 붙여넣기", (current) => {
       let next = current;
       const ids = new Map<string, BlockId>();
