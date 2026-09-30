@@ -219,6 +219,31 @@ describe("node creation gestures", () => {
   });
 });
 describe("connection mode UI", () => {
+  it("moves focus with arrows in connection mode and selects the target with Enter", () => {
+    click(nodes()[0]);
+    beginLink();
+    const right = new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true });
+    act(() => { nodes()[0].dispatchEvent(right); });
+    expect(right.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(nodes()[1]);
+    expect(nodes()[0].classList.contains("connection-first")).toBe(true);
+    expect(nodes()[0].classList.contains("is-selected")).toBe(true);
+    expect(preview()).toBeNull();
+    key(nodes()[1], "ArrowRight");
+    expect(document.activeElement).toBe(nodes()[2]);
+    key(nodes()[2], "ArrowLeft");
+    expect(document.activeElement).toBe(nodes()[1]);
+    key(nodes()[1], "Enter");
+    expect(nodes()[1].classList.contains("connection-second")).toBe(true);
+    expect(links()).toHaveLength(0);
+    key(nodes()[1], "ArrowRight");
+    expect(document.activeElement).toBe(nodes()[2]);
+    expect(nodes()[1].classList.contains("connection-second")).toBe(true);
+    key(nodes()[2], "ArrowLeft");
+    key(nodes()[1], "Enter");
+    expect(links()).toHaveLength(1);
+    expect(preview()).toBeNull();
+  });
   it("uses existing selection, previews, requires a separate Enter and exits after confirmation", () => {
     expect(links().length).toBe(0);
     key(window,"d",{ctrlKey:true});

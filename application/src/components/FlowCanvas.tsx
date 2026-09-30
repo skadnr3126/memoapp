@@ -451,15 +451,15 @@ export function FlowCanvas({
               onDoubleClick={() => { if (!linking) { activate(blockId); setSummaryDraft(block.title ?? ""); setEditingId(blockId); } }}
               onKeyDown={(e) => {
                 if (e.target !== e.currentTarget) return;
-                if (!linking && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+                if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
                   e.preventDefault();
                   const next = findDirectionalNeighbor(blockId, e.key as "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight", positions, flow.blockIds, heights);
                   if (next) {
                     const element = nodeElementsRef.current.get(next);
-                    onSelectedBlockIdsChange([next]);
+                    if (!linking) onSelectedBlockIdsChange([next]);
                     element?.focus();
                     element?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-                    onOpenBlock(next);
+                    if (!linking) onOpenBlock(next);
                   }
                   return;
                 }
