@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 mod summary;
 mod preferences;
-use preferences::{save_ui_preferences, load_workspace_preferences, restore_editor_preferences, recent_workspaces};
+use preferences::{save_ui_preferences, load_workspace_preferences, restore_editor_preferences, recent_workspaces, workspace_session};
 use std::{
     collections::HashSet,
     fs,
@@ -372,6 +372,7 @@ pub fn run() {
             load_workspace_preferences,
             restore_editor_preferences,
             recent_workspaces,
+            workspace_session,
             summary::has_openrouter_api_key,
             summary::delete_openrouter_api_key,
             summary::save_openrouter_api_key,

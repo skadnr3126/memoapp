@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("workspace tabs add, switch, deduplicate and close through the rendered UI", async ({ page }) => {
+test.beforeEach(async ({ page }) => {
   // Browser UI coverage with simulated IPC; native window behavior needs desktop QA.
   await page.addInitScript(() => {
     let callbackId = 0;
@@ -13,7 +13,14 @@ test("workspace tabs add, switch, deduplicate and close through the rendered UI"
         unregisterCallback(id: number) { callbacks.delete(id); },
         async invoke(command: string, args: Record<string, any> = {}) {
           if (command === "recent_workspaces") return ["D:/A", "D:/B"];
-          if (command === "resolve_workspace_root") return args.workspaceRoot;
+          if (command === "workspace_session") {
+            if (args.session) localStorage.setItem("test-workspace-session", JSON.stringify(args.session));
+            return JSON.parse(localStorage.getItem("test-workspace-session") ?? '{"openWorkspaceRoots":[],"activeWorkspaceRoot":null}');
+          }
+          if (command === "resolve_workspace_root") {
+            if (args.workspaceRoot === "D:/missing") throw new Error("작업공간 폴더가 존재하지 않습니다.");
+            return args.workspaceRoot;
+          }
           if (command === "plugin:window|get_all_windows") return ["main", "editor"];
           if (command === "plugin:event|listen") return ++callbackId;
           if (command === "plugin:dialog|open") return "D:/B";
@@ -24,6 +31,9 @@ test("workspace tabs add, switch, deduplicate and close through the rendered UI"
     });
   });
   await page.setViewportSize({ width: 1280, height: 850 });
+});
+
+test("workspace tabs add, switch, deduplicate and close through the rendered UI", async ({ page }) => {
   await page.goto("http://localhost:1420");
   await page.getByRole("button", { name: "D:/A", exact: true }).click();
   await page.getByRole("textbox", { name: "새 Flow", exact: true }).fill("A flow");
@@ -46,4 +56,43 @@ test("workspace tabs add, switch, deduplicate and close through the rendered UI"
   await page.getByRole("button", { name: "D:/B 작업공간 닫기", exact: true }).click();
   await expect(page.locator(".workspace-tab")).toHaveCount(1);
   await expect(page.getByRole("textbox", { name: "Flow 이름", exact: true })).toHaveValue("A flow");
+});
+
+test("open tabs and the active workspace survive reloads, including closing the last tab", async ({ page }) => {
+  await page.goto("http://localhost:1420");
+  await page.getByRole("button", { name: "D:/A", exact: true }).click();
+  await page.getByRole("button", { name: "작업공간 추가하기", exact: true }).click();
+  await page.getByRole("region", { name: "작업공간 추가" }).getByRole("button", { name: "D:/B", exact: true }).click();
+  await page.locator('.workspace-tab button[title="D:/A"]').click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("test-workspace-session") ?? "null"))).toEqual({
+    openWorkspaceRoots: ["D:/A", "D:/B"], activeWorkspaceRoot: "D:/A",
+  });
+  await page.reload();
+  await expect(page.locator(".workspace-tab button[title]")).toHaveText(["A", "B"]);
+  await expect(page.locator('.workspace-tab button[title="D:/A"]')).toHaveAttribute("aria-current", "page");
+  await page.getByRole("button", { name: "D:/A 작업공간 닫기", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("test-workspace-session") ?? "null"))).toEqual({
+    openWorkspaceRoots: ["D:/B"], activeWorkspaceRoot: "D:/B",
+  });
+  await page.reload();
+  await expect(page.locator(".workspace-tab button[title]")).toHaveText(["B"]);
+  await page.getByRole("button", { name: "D:/B 작업공간 닫기", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("test-workspace-session") ?? "null"))).toEqual({
+    openWorkspaceRoots: [], activeWorkspaceRoot: null,
+  });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "생각을 저장할 폴더를 선택하세요." })).toBeVisible();
+  await expect(page.locator(".workspace-tab")).toHaveCount(0);
+});
+
+test("an unavailable active workspace does not prevent the other tabs from restoring", async ({ page }) => {
+  await page.goto("http://localhost:1420");
+  await expect(page.getByRole("heading", { name: "생각을 저장할 폴더를 선택하세요." })).toBeVisible();
+  await page.evaluate(() => localStorage.setItem("test-workspace-session", JSON.stringify({
+    openWorkspaceRoots: ["D:/A", "D:/missing", "D:/B", "D:/A"], activeWorkspaceRoot: "D:/missing",
+  })));
+  await page.reload();
+  await expect(page.locator(".workspace-tab button[title]")).toHaveText(["A", "B"]);
+  await expect(page.locator('.workspace-tab button[title="D:/A"]')).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("alert")).toContainText("D:/missing");
 });

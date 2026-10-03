@@ -61,9 +61,10 @@ pub fn restore_editor_preferences(app: tauri::AppHandle, workspace_root: String)
     Ok(())
 }
 #[tauri::command]
-pub fn load_workspace_preferences(app: tauri::AppHandle, workspace_root: String) -> Result<Preferences, String> {
+pub fn load_workspace_preferences(app: tauri::AppHandle, workspace_root: String, restore_windows: Option<bool>) -> Result<Preferences, String> {
     let preferences: Preferences = read(&settings_path(&workspace_root)?)?;
     if preferences.sidebar_width.is_some_and(|w| !w.is_finite() || !(8.0..=480.0).contains(&w)) { return Err("잘못된 사이드바 너비입니다.".into()); }
+    if restore_windows == Some(false) { return Ok(preferences); }
     for label in ["main", "editor"] {
         if let Some(window) = app.get_webview_window(label) {
             let fallback = Geometry { x: 100, y: 100, width: if label == "main" {800} else {720}, height: if label == "main" {600} else {900}, maximized: false };
@@ -95,9 +96,52 @@ pub fn recent_workspaces(app: tauri::AppHandle, opened: Option<String>, removed:
     Ok(items)
 }
 
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSession {
+    open_workspace_roots: Vec<String>,
+    active_workspace_root: Option<String>,
+}
+
+#[tauri::command]
+pub fn workspace_session(app: tauri::AppHandle, session: Option<WorkspaceSession>) -> Result<WorkspaceSession, String> {
+    let _lock = super::STORAGE_LOCK.lock().map_err(|e| e.to_string())?;
+    let path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("workspace-session.json");
+    if let Some(session) = session {
+        super::write_atomic(&path, &serde_json::to_string_pretty(&session).map_err(|e| e.to_string())?)?;
+        Ok(session)
+    } else {
+        read(&path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn workspace_session_round_trips_order_selection_and_empty_tabs() {
+        let temp = std::env::temp_dir().join(format!("memo-session-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let path = temp.join("workspace-session.json");
+        let missing: WorkspaceSession = read(&path).unwrap();
+        assert!(missing.open_workspace_roots.is_empty());
+        assert_eq!(missing.active_workspace_root, None);
+        let session = WorkspaceSession {
+            open_workspace_roots: vec!["D:/메모 A".into(), "D:/B".into()],
+            active_workspace_root: Some("D:/B".into()),
+        };
+        super::super::write_atomic(&path, &serde_json::to_string_pretty(&session).unwrap()).unwrap();
+        let restored: WorkspaceSession = read(&path).unwrap();
+        assert_eq!(restored.open_workspace_roots, vec!["D:/메모 A", "D:/B"]);
+        assert_eq!(restored.active_workspace_root.as_deref(), Some("D:/B"));
+        super::super::write_atomic(&path, &serde_json::to_string(&WorkspaceSession::default()).unwrap()).unwrap();
+        let closed: WorkspaceSession = read(&path).unwrap();
+        assert!(closed.open_workspace_roots.is_empty());
+        assert_eq!(closed.active_workspace_root, None);
+        super::super::write_atomic(&path, "broken json").unwrap();
+        assert!(read::<WorkspaceSession>(&path).is_err());
+        fs::remove_dir_all(temp).unwrap();
+    }
+
     #[test]
     fn workspace_settings_are_isolated_and_round_trip() {
         let temp = std::env::temp_dir().join(format!("memo-preferences-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));

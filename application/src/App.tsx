@@ -52,6 +52,11 @@ type OpenWorkspace = {
   undo?: { workspace: WorkspaceState; positions: NodePositionsByFlow };
 };
 
+type WorkspaceSession = {
+  openWorkspaceRoots: string[];
+  activeWorkspaceRoot: string | null;
+};
+
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => createWorkspace());
   const [message, setMessage] = useState("새 Flow를 만들어 구조를 시작하세요.");
@@ -63,6 +68,8 @@ function App() {
   const workspaceSessionRef = useRef(crypto.randomUUID());
   const [workspaceRoot, setWorkspaceRoot] = useState<string>();
   const [openWorkspaces, setOpenWorkspaces] = useState<OpenWorkspace[]>([]);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const sessionSaveSequenceRef = useRef<Promise<unknown>>(Promise.resolve());
   const choosingRef = useRef(false);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [storageState, setStorageState] = useState<"checking" | "needs-workspace" | "loading" | "ready" | "error">("checking");
@@ -268,6 +275,7 @@ function App() {
       setOpenWorkspaces(existing ? next : add || !workspaceRoot ? [...next, tab] :
         next.map(item => item.workspaceRoot === workspaceRoot ? tab : item));
       activateWorkspace(tab);
+      setSessionLoaded(true);
       setAddingWorkspace(false);
       setMessage("작업공간을 열었습니다.");
       try { setRecentWorkspaces(await invoke<string[]>("recent_workspaces", { opened: tab.workspaceRoot })); }
@@ -369,18 +377,78 @@ function App() {
       setStorageState("ready");
       return () => { cancelled = true; };
     }
-    void invoke<string[]>("recent_workspaces").then(items => {
-      if (cancelled) return;
-      setRecentWorkspaces(items ?? []);
-      setStorageState("needs-workspace");
-      if (!cancelled) setPreferencesLoaded(true);
-    }).catch(error => {
-      if (cancelled) return;
-      setStorageState("needs-workspace");
-      setStorageError(`화면 설정을 불러오지 못했습니다: ${String(error)}`);
-    });
+    transitioningRef.current = true;
+    setWorkspaceBusy(true);
+    void (async () => {
+      const failures: string[] = [];
+      try {
+        const items = await invoke<string[]>("recent_workspaces").catch(error => {
+          failures.push(`최근 폴더 불러오기 실패: ${String(error)}`);
+          return [];
+        });
+        if (cancelled) return;
+        setRecentWorkspaces(items ?? []);
+        const session = await invoke<WorkspaceSession>("workspace_session");
+        if (cancelled) return;
+        const tabs: OpenWorkspace[] = [];
+        let activeRoot: string | undefined;
+        for (const path of session.openWorkspaceRoots) {
+          try {
+            const root = await invoke<string>("resolve_workspace_root", { workspaceRoot: path });
+            if (cancelled) return;
+            if (path === session.activeWorkspaceRoot) activeRoot = root;
+            if (tabs.some(tab => tab.workspaceRoot === root)) continue;
+            const loaded = await openNativeWorkspace(root);
+            if (cancelled) return;
+            const preferences = await invoke<{ sidebarWidth?: number }>("load_workspace_preferences", { workspaceRoot: root, restoreWindows: false });
+            if (cancelled) return;
+            tabs.push({ ...loaded, sidebarWidth: clampSidebarWidth(preferences?.sidebarWidth ?? 292), sidebarCollapsed: false });
+          } catch (error) {
+            failures.push(`${path}: ${String(error)}`);
+          }
+        }
+        if (cancelled) return;
+        const active = tabs.find(tab => tab.workspaceRoot === activeRoot) ?? tabs[0];
+        if (active) {
+          await invoke("load_workspace_preferences", { workspaceRoot: active.workspaceRoot }).catch(error => {
+            failures.push(`화면 설정 복원 실패: ${String(error)}`);
+          });
+          if (cancelled) return;
+          setOpenWorkspaces(tabs);
+          activateWorkspace(active);
+          setMessage("이전에 열린 작업공간을 복원했습니다.");
+        } else {
+          setStorageState("needs-workspace");
+        }
+        setSessionLoaded(true);
+      } catch (error) {
+        if (cancelled) return;
+        setStorageState("needs-workspace");
+        failures.push(`작업공간 복원 실패: ${String(error)}`);
+      } finally {
+        if (!cancelled) {
+          transitioningRef.current = false;
+          setWorkspaceBusy(false);
+          setPreferencesLoaded(true);
+          if (failures.length) setStorageError(failures.join("\n"));
+        }
+      }
+    })();
     return () => { cancelled = true; };
   }, []);
+
+  const workspaceSessionJson = JSON.stringify({
+    openWorkspaceRoots: openWorkspaces.map(tab => tab.workspaceRoot),
+    activeWorkspaceRoot: workspaceRoot ?? null,
+  } satisfies WorkspaceSession);
+  useEffect(() => {
+    if (!sessionLoaded || !isDesktopRuntime()) return;
+    const session: WorkspaceSession = JSON.parse(workspaceSessionJson);
+    const pending = sessionSaveSequenceRef.current.catch(() => undefined)
+      .then(() => invoke("workspace_session", { session }));
+    sessionSaveSequenceRef.current = pending;
+    void pending.catch(error => setStorageError(`열린 작업공간 저장 실패: ${String(error)}`));
+  }, [workspaceSessionJson, sessionLoaded]);
 
   useEffect(() => {
     if (!preferencesLoaded || storageState === "loading" || storageState === "checking" || storageState === "error") return;
@@ -504,6 +572,7 @@ function App() {
       transitioningRef.current = true;
       try {
         await preserveWorkspaceRef.current();
+        await sessionSaveSequenceRef.current;
         const editor = await WebviewWindow.getByLabel("editor");
         await editor?.destroy();
         await getCurrentWindow().destroy();
