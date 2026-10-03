@@ -219,6 +219,23 @@ describe("node creation gestures", () => {
   });
 });
 describe("connection mode UI", () => {
+  it("confirms with Ctrl+D only after selecting a target and ignores repeated keys", () => {
+    beginLink();
+    beginLink();
+    expect(nodes()[2].classList.contains("connection-first")).toBe(true);
+    expect(links()).toHaveLength(0);
+    click(nodes()[0]);
+    expect(preview()).not.toBeNull();
+    key(nodes()[0], "d", { ctrlKey: true, repeat: true });
+    expect(links()).toHaveLength(0);
+    const shortcut = new KeyboardEvent("keydown", { key: "D", ctrlKey: true, bubbles: true, cancelable: true });
+    act(() => { nodes()[0].dispatchEvent(shortcut); });
+    expect(shortcut.defaultPrevented).toBe(true);
+    expect(links()).toHaveLength(1);
+    expect(preview()).toBeNull();
+    expect(nodes()[0].classList.contains("is-selected")).toBe(true);
+    expect(nodes().some(node => node.classList.contains("connection-first"))).toBe(false);
+  });
   it("moves focus with arrows in connection mode and selects the target with Enter", () => {
     click(nodes()[0]);
     beginLink();

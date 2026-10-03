@@ -766,7 +766,12 @@ function App() {
         setSelectedBlockIds([]); setSelectedLinkId(undefined); setConnection({ kind: "idle" }); setMessage("실행 취소 완료");
         return;
       }
-      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "d") { event.preventDefault(); beginConnection(); return; }
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        if (connection.kind === "ready") confirmConnection();
+        else beginConnection();
+        return;
+      }
       if (connection.kind !== "idle") {
         if (event.key === "Escape") { event.preventDefault(); setConnection({ kind: "idle" }); }
         if (event.key === "Enter" && connection.kind === "ready" && !(event.target instanceof Element && event.target.closest("button"))) { event.preventDefault(); confirmConnection(); }
