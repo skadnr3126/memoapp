@@ -1,5 +1,61 @@
 import { expect, test } from "@playwright/test";
 
+test("summary text copies the current selection even while a block remains selected", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.addInitScript(() => {
+    let callbackId = 0;
+    Object.assign(window, {
+      __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener() {} },
+      __TAURI_INTERNALS__: {
+        metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+        transformCallback() { return ++callbackId; },
+        unregisterCallback() {},
+        async invoke(command: string, args: Record<string, unknown> = {}) {
+          if (command === "recent_workspaces") return ["D:/summary-test"];
+          if (command === "workspace_session") return { openWorkspaceRoots: [], activeWorkspaceRoot: null };
+          if (command === "resolve_workspace_root") return args.workspaceRoot;
+          if (command === "open_workspace") return { workspaceRoot: args.workspaceRoot, blockFiles: [], flowFiles: [] };
+          if (command === "load_workspace_preferences") return { sidebarWidth: 292 };
+          if (command === "load_flow_summary") return { path: "D:/summary-test/.memo/ai/summaries/test.md", markdown: "First summary passage.\nSecond summary passage." };
+          if (command === "plugin:window|get_all_windows") return ["main", "editor"];
+          if (command === "plugin:event|listen") return ++callbackId;
+        },
+      },
+    });
+  });
+  await page.goto("http://localhost:1420");
+  await page.getByRole("button", { name: "D:/summary-test", exact: true }).click();
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.locator(".flow-canvas-scroll").hover({ position: { x: 300, y: 250 } });
+  await page.keyboard.press("Control+t");
+  await expect(page.locator(".flow-node.is-selected")).toHaveCount(1);
+  await page.getByText("요약 Markdown 보기", { exact: true }).click();
+  const summary = page.locator(".flow-summary-result pre");
+  await expect(summary).toContainText("Second summary passage.");
+  for (const [index, text] of ["First summary passage.", "Second summary passage."].entries()) {
+    if (index === 0) await summary.evaluate(element => { element.tabIndex = 0; element.focus(); });
+    else await page.locator(".flow-node").focus();
+    await summary.evaluate((element, text) => {
+      const node = element.firstChild;
+      if (!node) throw new Error("Summary text missing");
+      const start = (node.textContent ?? "").indexOf(text);
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, start + text.length);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }, text);
+    await page.keyboard.press("Control+c");
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(text);
+  }
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  await page.locator(".flow-node").focus();
+  await page.keyboard.press("Control+c");
+  await page.keyboard.press("Control+v");
+  await expect(page.locator(".flow-node")).toHaveCount(2);
+});
+
 test("pastes at the pointer even when an existing block occupies that position", async ({ page }) => {
   await page.goto("http://localhost:1420");
   await page.getByRole("button", { name: "만들기", exact: true }).click();

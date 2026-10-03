@@ -730,9 +730,12 @@ function App() {
   };
 
   useEffect(() => {
-    const editingText = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+    const editingText = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable='true'], .flow-summary-result"));
     const copy = (event: ClipboardEvent) => {
       if (transitioningRef.current || !hydratedRef.current || editingText(event.target) || !selectedBlockIds.length || !event.clipboardData || !activeFlow) return false;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && [selection.anchorNode, selection.focusNode].some(node =>
+        (node instanceof Element ? node : node?.parentElement)?.closest(".flow-summary-result"))) return false;
       const value = serializeCopiedBlocks(workspaceRef.current, activeFlow, selectedBlockIds, nodePositionsByFlow[activeFlow.id] ?? {});
       const copied = parseCopiedBlocks(value);
       if (!copied) return false;
