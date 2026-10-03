@@ -1,15 +1,16 @@
 import { linkPair, type Block, type Flow, type WorkspaceState } from "./domain/flow";
 import { defaultPosition, NODE_WIDTH, NODE_HEIGHT, type Point } from "./domain/layout";
+import { isBlockColor } from "./domain/blockColor";
 
 export const BLOCK_CLIPBOARD_TYPE = "application/x-flow-memo-block+json";
 
-export type CopiedBlock = { title: string; markdown: string; width?: number; height?: number };
+export type CopiedBlock = Pick<Block, "color"> & { title: string; markdown: string; width?: number; height?: number };
 export type CopiedBlocks = {
   blocks: (CopiedBlock & { id: string; x: number; y: number })[];
   links: { source: string; target: string }[];
 };
 
-export const serializeCopiedBlock = (block: Block, position?: Point) => JSON.stringify({ version: 1, title: block.title ?? "", markdown: block.markdown, width: position?.width, height: position?.height });
+export const serializeCopiedBlock = (block: Block, position?: Point) => JSON.stringify({ version: 1, title: block.title ?? "", markdown: block.markdown, color: block.color, width: position?.width, height: position?.height });
 
 export const parseCopiedBlock = (value: string): CopiedBlock | undefined => {
   try {
@@ -17,10 +18,12 @@ export const parseCopiedBlock = (value: string): CopiedBlock | undefined => {
     if (!parsed || typeof parsed !== "object") return undefined;
     const block = parsed as Record<string, unknown>;
     if (block.version !== 1 || typeof block.title !== "string" || typeof block.markdown !== "string") return undefined;
+    const color = block.color;
+    if (color !== undefined && !isBlockColor(color)) return undefined;
     for (const [size, minimum] of [["width", 80], ["height", 72]] as const) {
       if (block[size] !== undefined && (typeof block[size] !== "number" || !Number.isFinite(block[size]) || block[size] < minimum || block[size] > 1_000_000)) return undefined;
     }
-    return { title: block.title, markdown: block.markdown, ...(block.width !== undefined && { width: block.width as number }), ...(block.height !== undefined && { height: block.height as number }) };
+    return { title: block.title, markdown: block.markdown, ...(color !== undefined && { color }), ...(block.width !== undefined && { width: block.width as number }), ...(block.height !== undefined && { height: block.height as number }) };
   } catch {
     return undefined;
   }
@@ -30,7 +33,7 @@ export const serializeCopiedBlocks = (workspace: WorkspaceState, flow: Flow, ids
   const selected = new Set(ids);
   const blocks = flow.blockIds.flatMap((id, index) => {
     const block = workspace.blocks.get(id);
-    return selected.has(id) && block ? [{ id, title: block.title ?? "", markdown: block.markdown, ...(positions[id] ?? defaultPosition(index)) }] : [];
+    return selected.has(id) && block ? [{ id, title: block.title ?? "", markdown: block.markdown, color: block.color, ...(positions[id] ?? defaultPosition(index)) }] : [];
   });
   const left = Math.min(...blocks.map(block => block.x));
   const top = Math.min(...blocks.map(block => block.y));

@@ -4,6 +4,16 @@ import { decodeWorkspace, snapshotFor } from "./repository";
 const block = (id: string) => ({id,title:'따옴표 " 제목',markdown:"# 본문\n\n- 항목",createdAt:"2026-07-21T01:00:00.000Z",updatedAt:"2026-07-21T02:00:00.000Z"});
 const legacy = {version:1,id:"flow_a",title:"Legacy",root:{id:"root",items:["A","B","C"],branches:{A:[{id:"child",items:["D","E"],branches:{D:[{id:"nested",items:["F"],branches:{}}]}},{id:"empty",items:[],branches:{}}]}}};
 describe("storage and migration", () => {
+  it("preserves block color through a workspace save and reload and accepts old blocks", () => {
+    const colored = { ...block("A"), color: "blue" } as const;
+    const flow = deserializeFlow({ version: 2, id: "f", title: "F", blocks: ["A"], links: [] });
+    const workspace = restoreWorkspace([colored], [flow], { version: 1 });
+    const snapshot = snapshotFor(workspace, {});
+    expect(snapshot.blockFiles[0].content).toContain('color: "blue"');
+    expect(decodeWorkspace({ ...snapshot, workspaceRoot: "D:/test" }).workspace.blocks.get("A")).toEqual(colored);
+    expect(deserializeBlock(serializeBlock(block("A"))).color).toBeUndefined();
+    expect(() => deserializeBlock(serializeBlock(colored).replace('color: "blue"', 'color: "invalid"'))).toThrow("색상");
+  });
   it("round-trips Markdown without changing content or timestamps",()=>expect(deserializeBlock(serializeBlock(block("A")))).toEqual(block("A")));
   it("accepts CRLF, BOM, and whitespace before block frontmatter",()=>{
     const source=serializeBlock(block("A"));

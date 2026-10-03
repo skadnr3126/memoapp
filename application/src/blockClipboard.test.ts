@@ -3,6 +3,14 @@ import { parseCopiedBlock, serializeCopiedBlock, parseCopiedBlocks, serializeCop
 import { createWorkspace, createFlow, createBlock, connectBlocks } from "./domain/flow";
 
 describe("block clipboard", () => {
+  it("preserves color in single and multiple block clipboard data and rejects unknown colors", () => {
+    const block = { id: "b", title: "제목", markdown: "내용", color: "purple", createdAt: "", updatedAt: "" } as const;
+    expect(parseCopiedBlock(serializeCopiedBlock(block))).toEqual({ title: "제목", markdown: "내용", color: "purple" });
+    const workspace = { blocks: new Map([[block.id, block]]), flows: new Map() };
+    const flow = { id: "f", title: "F", blockIds: [block.id], links: new Map() };
+    expect(parseCopiedBlocks(serializeCopiedBlocks(workspace, flow, [block.id], {}))?.blocks[0].color).toBe("purple");
+    expect(parseCopiedBlock('{"version":1,"title":"T","markdown":"M","color":"invalid"}')).toBeUndefined();
+  });
   it("round-trips blocks and rejects ordinary or malformed text", () => {
     const block = { id: "b", title: "제목", markdown: "# 내용", createdAt: "", updatedAt: "" };
     expect(parseCopiedBlock(serializeCopiedBlock(block))).toEqual({ title: "제목", markdown: "# 내용" });

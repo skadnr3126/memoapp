@@ -8,6 +8,18 @@ const fixture = () => {
   return { workspace: c.workspace, flowId: f.flowId, a: a.blockId, b: b.blockId, c: c.blockId };
 };
 describe("undirected flow", () => {
+  it("changes and resets color without losing content or changing the prior workspace", () => {
+    const f = fixture();
+    const original = updateBlock(f.workspace, f.a, { title: "Title", markdown: "# Body" }).workspace;
+    const colored = updateBlock(original, f.a, { color: "red" }).workspace;
+    expect(colored.blocks.get(f.a)).toMatchObject({ title: "Title", markdown: "# Body", color: "red" });
+    expect(original.blocks.get(f.a)?.color).toBeUndefined();
+    const edited = updateBlock(colored, f.a, { markdown: "New body" }).workspace;
+    expect(edited.blocks.get(f.a)?.color).toBe("red");
+    const reset = updateBlock(edited, f.a, { color: undefined }).workspace;
+    expect(reset.blocks.get(f.a)).toMatchObject({ title: "Title", markdown: "New body" });
+    expect(reset.blocks.get(f.a)?.color).toBeUndefined();
+  });
   it("creates independent blocks and allows cycles and isolated blocks", () => {
     const f = fixture(); let w = f.workspace;
     expect(w.flows.get(f.flowId)!.links.size).toBe(0);

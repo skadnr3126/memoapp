@@ -2,6 +2,7 @@ import type { FlowViewport } from "../storage/types";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BlockId, Flow, getDisplayTitle, WorkspaceState } from "../domain/flow";
 import { ConnectionState } from "../domain/connection";
+import { BLOCK_COLORS, type BlockColor } from "../domain/blockColor";
 import { defaultPosition, linkPath, NODE_WIDTH, NODE_HEIGHT, resizeNode, type Point, type ResizeCorner } from "../domain/layout";
 
 export type NodePosition = Point;
@@ -94,6 +95,7 @@ type FlowCanvasProps = {
   onCreateBlock?: (position: NodePosition) => void;
   onPointerBlockPositionChange?: (position?: NodePosition) => void;
   onDeleteBlock?: (id: BlockId) => void;
+  onChangeBlockColor?: (id: BlockId, color: BlockColor | undefined) => void;
   onDeleteLink?: (id: string) => void;
   onBeginConnection?: (id: BlockId) => void;
 };
@@ -108,7 +110,7 @@ export function FlowCanvas({
   selectedBlockIds,
   onSelectedBlockIdsChange,
   onNodePositionsChange,
-  connection, onChooseConnectionBlock, selectedLinkId, onSelectLink, onCreateBlock, onPointerBlockPositionChange, onDeleteBlock, onDeleteLink, onBeginConnection,
+  connection, onChooseConnectionBlock, selectedLinkId, onSelectLink, onCreateBlock, onPointerBlockPositionChange, onDeleteBlock, onChangeBlockColor, onDeleteLink, onBeginConnection,
 }: FlowCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const restoredViewportRef = useRef(false);
@@ -124,7 +126,7 @@ export function FlowCanvas({
   const panDragRef = useRef<(PanDrag & { moved: boolean; blockId?: BlockId; linkId?: string }) | undefined>(undefined);
   const mouseRef = useRef<NodePosition | undefined>(undefined);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; position: NodePosition; blockId?: BlockId; linkId?: string }>();
+  const [menu, setMenu] = useState<{ x: number; y: number; position: NodePosition; blockId?: BlockId; linkId?: string; colorPicker?: boolean }>();
   const selectionDragRef = useRef<SelectionDrag | undefined>(undefined);
   const autoScrollPointerRef = useRef<NodePosition | undefined>(undefined);
   const autoScrollFrameRef = useRef<number | undefined>(undefined);
@@ -402,10 +404,21 @@ export function FlowCanvas({
         finishPanning(e.currentTarget, e.pointerId);
       }} onPointerCancel={(e) => finishPanning(e.currentTarget, e.pointerId)}
       onLostPointerCapture={(e) => finishPanning(e.currentTarget, e.pointerId)}>
-      {menu && <div ref={menuRef} className="canvas-context-menu" role="menu" aria-label={menu.linkId ? "연결 작업" : menu.blockId ? "블록 작업" : "노드 생성"} style={{ left: menu.x, top: menu.y }}
+      {menu && <div ref={menuRef} className="canvas-context-menu" role="menu" aria-label={menu.linkId ? "연결 작업" : menu.blockId ? "블록 작업" : "노드 생성"} style={{ left: menu.x, top: Math.max(0, Math.min(menu.y, window.innerHeight - (menu.colorPicker ? 250 : menu.blockId ? 134 : 54))), maxHeight: window.innerHeight }}
         onPointerDown={(e) => e.stopPropagation()}>
         {menu.linkId ? <button role="menuitem" onClick={() => { onDeleteLink?.(menu.linkId!); setMenu(undefined); }}>연결 삭제 <span>Delete</span></button> : menu.blockId ? <>
           <button role="menuitem" onClick={() => { onBeginConnection?.(menu.blockId!); setMenu(undefined); }}>연결모드 진입 <span>Ctrl+D</span></button>
+          <button role="menuitem" aria-expanded={Boolean(menu.colorPicker)} onClick={() => setMenu({ ...menu, colorPicker: !menu.colorPicker })}>색상 변경</button>
+          {menu.colorPicker && <div className="block-color-palette" role="group" aria-label="블록 색상">
+            <button role="menuitemradio" aria-checked={!workspace.blocks.get(menu.blockId)?.color}
+              onClick={() => { onChangeBlockColor?.(menu.blockId!, undefined); setMenu(undefined); }}>
+              <span className="block-color-swatch" style={{ background: "rgba(255,255,252,.93)" }} />기본색
+            </button>
+            {BLOCK_COLORS.map(color => <button key={color.value} role="menuitemradio" aria-checked={workspace.blocks.get(menu.blockId!)?.color === color.value}
+              onClick={() => { onChangeBlockColor?.(menu.blockId!, color.value); setMenu(undefined); }}>
+              <span className="block-color-swatch" style={{ background: color.background }} />{color.label}
+            </button>)}
+          </div>}
           <button role="menuitem" onClick={() => { onDeleteBlock?.(menu.blockId!); setMenu(undefined); }}>삭제 <span>Delete</span></button>
         </> : <button role="menuitem" onClick={() => { onCreateBlock?.(menu.position); setMenu(undefined); }}>새 노드 생성 <span>Ctrl+T</span></button>}
       </div>}
@@ -444,7 +457,7 @@ export function FlowCanvas({
           const second = connection.kind === "ready" && connection.second === blockId;
           return <div className="node-wrap graph-node-wrap" data-block-id={blockId} style={{ left: point.x, top: point.y, width: point.width }} key={blockId}>
             <article ref={(element) => { if (element) nodeElementsRef.current.set(blockId, element); else nodeElementsRef.current.delete(blockId); }}
-              style={{ height: point.height }}
+              style={{ height: point.height, backgroundColor: BLOCK_COLORS.find(color => color.value === block.color)?.background }}
               className={"flow-node" + (editingId === blockId ? " is-editing" : "") + (selectedBlockIdSet.has(blockId) ? " is-selected" : "") + (first ? " connection-first" : "") + (second ? " connection-second" : "")}
               role="button" tabIndex={0} aria-label={getDisplayTitle(block) + (linking ? " 연결 대상으로 선택" : " 편집")}
               onClick={(e) => { if (editingId !== blockId && !suppressClickRef.current) { e.currentTarget.focus(); activate(blockId); } }}

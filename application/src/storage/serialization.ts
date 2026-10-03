@@ -1,5 +1,6 @@
 import { Block, Flow, Link, WorkspaceState, validateWorkspace } from "../domain/flow";
 import { PersistedFlow, PersistedLayout, PersistedWorkspace, BLOCK_SCHEMA_VERSION, FLOW_SCHEMA_VERSION, LAYOUT_SCHEMA_VERSION, WORKSPACE_SCHEMA_VERSION } from "./types";
+import { isBlockColor } from "../domain/blockColor";
 const requiredString = (value: unknown, label: string): string => {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label}이(가) 없습니다.`);
   return value;
@@ -34,6 +35,7 @@ export const serializeBlock = (block: Block): string => {
     `version: ${BLOCK_SCHEMA_VERSION}`,
     `id: ${JSON.stringify(block.id)}`,
     ...(block.title !== undefined ? [`title: ${JSON.stringify(block.title)}`] : []),
+    ...(block.color !== undefined ? [`color: ${JSON.stringify(block.color)}`] : []),
     `createdAt: ${JSON.stringify(block.createdAt)}`,
     `updatedAt: ${JSON.stringify(block.updatedAt)}`,
     "---",
@@ -62,10 +64,12 @@ export const deserializeBlock = (source: string): Block => {
   const createdAt = requiredString(metadata.createdAt, "Block 생성 시각");
   const updatedAt = requiredString(metadata.updatedAt, "Block 수정 시각");
   const title = metadata.title;
+  const color = metadata.color;
+  if (color !== undefined && !isBlockColor(color)) throw new Error("Block 색상이 올바르지 않습니다.");
   const afterClosing = content.slice(closingOffset + closing[0].length);
   const markdown = afterClosing.replace(/^\r?\n/, "");
 
-  return { id, title, markdown, createdAt, updatedAt };
+  return { id, title, markdown, createdAt, updatedAt, ...(color !== undefined && { color }) };
 };
 
 export const serializeFlow = (flow: Flow): PersistedFlow => ({

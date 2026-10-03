@@ -251,6 +251,11 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .canvas-context-menu button { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 10px 8px; border: 0; border-radius: 4px; color: #25312a; background: transparent; font-size: .8rem; }
 .canvas-context-menu button:hover, .canvas-context-menu button:focus-visible { background: #e8f2e7; outline: none; }
 .canvas-context-menu span { color: #617267; font-size: .7rem; }
+.canvas-context-menu { overflow-y: auto; }
+.block-color-palette { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px 0; }
+.block-color-palette button { flex-direction: column; justify-content: center; gap: 5px; padding: 6px 2px; font-size: .7rem; }
+.block-color-swatch { width: 22px; height: 22px; border: 1px solid #cad9cc; border-radius: 50%; }
+.block-color-palette [aria-checked="true"] .block-color-swatch { outline: 2px solid #347a4a; outline-offset: 2px; }
 
 .node-summary { position: relative; width: 100%; }
 .node-summary-text, .node-summary-input { margin: 0; padding: 0; width: 100%; border: 0; font: inherit; font-size: 15px; font-weight: 400; line-height: 1.7; letter-spacing: normal; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; }

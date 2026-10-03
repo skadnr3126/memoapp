@@ -1,7 +1,9 @@
-﻿export type BlockId = string;
+﻿import type { BlockColor } from "./blockColor";
+
+export type BlockId = string;
 export type FlowId = string;
 export type LinkId = string;
-export type Block = { id: BlockId; title?: string; markdown: string; createdAt: string; updatedAt: string };
+export type Block = { id: BlockId; title?: string; markdown: string; color?: BlockColor; createdAt: string; updatedAt: string };
 export type Link = { id: LinkId; source: BlockId; target: BlockId };
 export type Flow = { id: FlowId; title: string; blockIds: BlockId[]; links: Map<LinkId, Link> };
 export type WorkspaceState = { blocks: Map<BlockId, Block>; flows: Map<FlowId, Flow>; activeFlowId?: FlowId };
@@ -44,7 +46,7 @@ export const createBlock = (workspace: WorkspaceState, flowId: FlowId): BlockCom
   next.blocks.set(blockId, { id: blockId, title: "", markdown: "", createdAt: timestamp, updatedAt: timestamp });
   return { workspace: next, blockId };
 };
-export const updateBlock = (workspace: WorkspaceState, blockId: BlockId, changes: Pick<Block, "title" | "markdown">): CommandResult => {
+export const updateBlock = (workspace: WorkspaceState, blockId: BlockId, changes: Partial<Pick<Block, "title" | "markdown" | "color">>): CommandResult => {
   const next = cloneWorkspace(workspace);
   const block = next.blocks.get(blockId);
   if (!block) throw new Error("Block을 찾을 수 없습니다.");

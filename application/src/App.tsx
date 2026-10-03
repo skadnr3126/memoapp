@@ -717,7 +717,7 @@ function App() {
       // ponytail: existing commands clone per block; add a batch domain command if large selections become slow.
       for (const block of copied.blocks) {
         const result = createBlock(next, activeFlow.id);
-        next = updateBlock(result.workspace, result.blockId, { title: block.title, markdown: block.markdown }).workspace;
+        next = updateBlock(result.workspace, result.blockId, { title: block.title, markdown: block.markdown, color: block.color }).workspace;
         ids.set(block.id, result.blockId);
         pastedPositions[result.blockId] = { x: point.x + block.x, y: point.y + block.y, width: block.width, height: block.height };
       }
@@ -915,6 +915,7 @@ function App() {
                 onCreateBlock={addBlock}
                 onPointerBlockPositionChange={(position) => { pointerBlockPositionRef.current = position; }}
                 onDeleteBlock={deleteSelectedBlock}
+                onChangeBlockColor={(id, color) => { runCommand("블록 색상 변경", current => updateBlock(current, id, { color })); }}
                 onDeleteLink={deleteLink}
                 onBeginConnection={(id) => {
                   if (connection.kind !== "idle") return;
