@@ -26,6 +26,12 @@
 .scription-document pre code { padding: 0; background: none; }
 .scription-document a { color: #397652; text-decoration: underline; }
 .scription-document hr { border: 0; border-top: 1px solid #dce4da; margin: 2em 0; }
+.scription-toggle { position: relative; margin: .75em 0; padding-left: 28px; }
+.scription-toggle > button { position: absolute; top: 0; left: 0; padding: 3px 6px; font-size: 16px; line-height: 1.5; }
+.scription-toggle-title { display: block; list-style: none; min-height: 1.85em; font-weight: 600; }
+.scription-toggle-title::-webkit-details-marker { display: none; }
+.scription-toggle-body { padding: .5em 0 0 .75em; border-left: 2px solid #dce4da; }
+.scription-toggle.is-collapsed > div > .scription-toggle-body { display: none; }
 .scription-document ul[data-type="taskList"] { list-style: none; padding-left: 0; }
 .scription-document li[data-type="taskItem"] { display: flex; gap: 10px; align-items: baseline; }
 .scription-document li[data-type="taskItem"] > label { flex: 0 0 auto; user-select: none; }

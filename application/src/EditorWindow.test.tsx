@@ -237,3 +237,63 @@ it("keeps plain text paste in the current line and places the caret by a page cl
   expect(editor.state.selection.to).toBe(6);
   expect(posAtCoords).not.toHaveBeenCalled();
 });
+
+it("opens and closes a toggle without saving, then preserves formatted edits on reload", async () => {
+  const original = ":::toggle **제목**\n\n본문과 *강조*\n\n- 항목\n\n:::";
+  load("toggle", original);
+  expect(host.querySelector(".scription-toggle-title strong")?.textContent).toBe("제목");
+  expect(host.querySelector(".scription-toggle-body em")?.textContent).toBe("강조");
+  expect(host.querySelector(".scription-toggle-body li")?.textContent).toBe("항목");
+  const button = host.querySelector<HTMLButtonElement>('button[aria-label="토글 펼치기"]')!;
+  act(() => button.click());
+  expect(button.getAttribute("aria-expanded")).toBe("true");
+  act(() => button.click());
+  await act(async () => vi.advanceTimersByTime(1000));
+  expect(saves()).toHaveLength(0);
+  clickButton("마크다운 원문");
+  expect(host.querySelector("textarea")!.value).toBe(original);
+  clickButton("문서 보기");
+  act(() => documentEditor().commands.insertContentAt(2, "수정 "));
+  await act(async () => vi.advanceTimersByTime(1000));
+  const saved = saves()[0][2].markdown;
+  expect(saved).toContain(":::toggle **수정 제목**");
+  expect(saved).toContain("*강조*");
+  expect(saved).toContain("- 항목");
+  load("reloaded", saved);
+  expect(host.querySelector(".scription-toggle-title")?.textContent).toBe("수정 제목");
+  expect(host.querySelectorAll(".scription-toggle")).toHaveLength(1);
+});
+
+it("pastes nested toggles and preserves closing markers inside fenced code", async () => {
+  const markdown = ":::toggle 바깥\n\n:::toggle 안쪽\n\n```text\n:::\n```\n\n:::toggle 빈 토글\n::: \n\n::: \n\n:::";
+  const editor = documentEditor();
+  act(() => {
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { getData: () => markdown, files: [] } });
+    editor.view.dom.dispatchEvent(paste);
+  });
+  expect(host.querySelectorAll(".scription-toggle")).toHaveLength(3);
+  expect(host.querySelector("pre")?.textContent).toBe(":::");
+  await act(async () => vi.advanceTimersByTime(1000));
+  expect(saves()[0][2].markdown).toBe(":::toggle 바깥\n\n:::toggle 안쪽\n\n```text\n:::\n```\n\n:::toggle 빈 토글\n\n\n\n:::\n\n:::\n\n:::");
+  load("nested-reload", saves()[0][2].markdown);
+  expect(host.querySelectorAll(".scription-toggle")).toHaveLength(3);
+  expect(host.querySelector("pre")?.textContent).toBe(":::");
+});
+
+it("adds a toggle from the toolbar and supports undo", () => {
+  clickButton("토글 추가");
+  expect(host.querySelector(".scription-toggle-title")?.textContent).toBe("토글 제목");
+  act(() => documentEditor().commands.undo());
+  expect(host.querySelector(".scription-toggle")).toBeNull();
+});
+
+it("keeps incomplete toggles literal and unsupported content inside toggles in source mode", () => {
+  load("incomplete", ":::toggle 제목\n\n끝나지 않은 내용");
+  expect(host.querySelector(".scription-toggle")).toBeNull();
+  expect(documentEditor().getText()).toContain("끝나지 않은 내용");
+  load("unsupported-toggle", ":::toggle 제목\n\n![이미지](photo.png)\n\n:::");
+  expect(host.querySelector("textarea")?.value).toContain("![이미지](photo.png)");
+  load("unsupported-title", ":::toggle ![제목 이미지](photo.png)\n\n본문\n\n:::");
+  expect(host.querySelector("textarea")?.value).toContain("![제목 이미지](photo.png)");
+});

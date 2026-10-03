@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
-import { marked } from "marked";
+import { markdownLexer } from "./markdownToggle";
 import { documentExtensions, requiresSource } from "./markdownConfig";
 
 type Props = { markdown: string; title?: string; onChange: (markdown: string) => void; toolbar?: ReactNode };
@@ -27,7 +27,7 @@ export function MarkdownDocument({ markdown, title = "", onChange, toolbar }: Pr
         const text = event.clipboardData?.getData("text/plain");
         if (!text || !editor || editor.isActive("codeBlock")) return false;
         event.preventDefault();
-        const tokens = marked.lexer(text);
+        const tokens = markdownLexer.lexer(text);
         if (requiresSource(text) || (tokens.length === 1 && tokens[0].type === "paragraph" && tokens[0].tokens?.every(token => token.type === "text"))) {
           editor.commands.insertContent({ type: "text", text });
         }
@@ -59,6 +59,12 @@ export function MarkdownDocument({ markdown, title = "", onChange, toolbar }: Pr
       <span className="scription-block-hint" title={fullTitle || titleHint}>{titleHint}</span>
       <div>
         {toolbar}
+        <button type="button" disabled={source || !editor} onClick={() => editor?.chain().focus().insertContent({
+          type: "toggle", content: [
+            { type: "toggleTitle", content: [{ type: "text", text: "토글 제목" }] },
+            { type: "toggleBody", content: [{ type: "paragraph" }] },
+          ],
+        }).run()}>토글 추가</button>
         <button type="button" aria-expanded={help} onClick={() => setHelp(!help)}>문법 안내</button>
         <button type="button" onClick={switchMode} disabled={source && unsupported} aria-pressed={source}>
           {source ? "문서 보기" : "마크다운 원문"}
@@ -69,6 +75,8 @@ export function MarkdownDocument({ markdown, title = "", onChange, toolbar }: Pr
       <p><code># </code>제목 · <code>## </code>소제목 · <code>- </code>목록 · <code>1. </code>번호 목록 · <code>[ ] </code>체크리스트</p>
       <p><code>**굵게**</code> · <code>*기울임*</code> · <code>~~취소선~~</code> · <code>`코드`</code> · <code>&gt; </code>인용 · <code>```</code>코드 블록 · <code>---</code>구분선</p>
       <p>Ctrl+B / Ctrl+I 강조 · Ctrl+Z 되돌리기 · 빈 목록에서 Enter로 목록 종료 · 링크는 원문에서 [이름](주소)</p>
+      <p>토글은 빈 줄에서 <code>&gt; </code>를 입력하거나 토글 추가 버튼으로 만듭니다. 제목에서 Enter를 누르면 본문으로 이동합니다.</p>
+      <p>원문에서는 <code>:::toggle 제목</code> 다음 줄부터 내용을 쓰고 <code>:::</code>로 닫습니다. 제목 옆 화살표로 접고 펼칩니다.</p>
     </aside>}
     {source && unsupported && <p className="scription-source-note">표·이미지·HTML이 포함된 문서는 내용을 보존하기 위해 원문으로 편집합니다.</p>}
     {source ? <textarea className="scription-source" aria-label="Scription 마크다운 원문" value={markdown}
