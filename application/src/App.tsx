@@ -69,6 +69,10 @@ function App() {
   const [workspaceRoot, setWorkspaceRoot] = useState<string>();
   const [openWorkspaces, setOpenWorkspaces] = useState<OpenWorkspace[]>([]);
   const [sessionLoaded, setSessionLoaded] = useState(false);
+  const tabDragRef = useRef<{ root: string; pointerId: number; startX: number; moved: boolean } | undefined>(undefined);
+  const [tabDropTarget, setTabDropTarget] = useState<{ root: string; after: boolean }>();
+  const tabDropTargetRef = useRef<typeof tabDropTarget>(undefined);
+  const suppressTabClickRef = useRef(false);
   const sessionSaveSequenceRef = useRef<Promise<unknown>>(Promise.resolve());
   const choosingRef = useRef(false);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
@@ -331,11 +335,70 @@ function App() {
     else await returnToWorkspaceSelection(true);
   };
 
+  const moveWorkspaceTab = (event: PointerEvent<HTMLButtonElement>) => {
+    const drag = tabDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.moved && Math.abs(event.clientX - drag.startX) < 5) return;
+    drag.moved = true;
+    const nav = event.currentTarget.closest(".workspace-tabs");
+    const tabs = nav?.querySelectorAll<HTMLElement>(".workspace-tab");
+    let target: typeof tabDropTarget;
+    if (tabs) {
+      for (const tab of tabs) {
+        const rect = tab.getBoundingClientRect();
+        if (event.clientX >= rect.left && event.clientX <= rect.right &&
+            event.clientY >= rect.top && event.clientY <= rect.bottom) {
+          const root = tab.dataset.workspaceRoot!;
+          if (root !== drag.root) target = { root, after: event.clientX > rect.left + rect.width / 2 };
+          break;
+        }
+      }
+    }
+    tabDropTargetRef.current = target;
+    setTabDropTarget(target);
+  };
+
+  const finishWorkspaceTabDrag = (event: PointerEvent<HTMLButtonElement>, cancelled = false) => {
+    const drag = tabDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const target = tabDropTargetRef.current;
+    suppressTabClickRef.current = drag.moved;
+    tabDragRef.current = undefined;
+    tabDropTargetRef.current = undefined;
+    setTabDropTarget(undefined);
+    if (!cancelled && drag.moved && target && !transitioningRef.current && !choosingRef.current) {
+      setOpenWorkspaces(tabs => {
+        const source = tabs.find(tab => tab.workspaceRoot === drag.root);
+        const remaining = tabs.filter(tab => tab.workspaceRoot !== drag.root);
+        const index = remaining.findIndex(tab => tab.workspaceRoot === target.root);
+        if (!source || index < 0) return tabs;
+        remaining.splice(index + (target.after ? 1 : 0), 0, source);
+        return remaining;
+      });
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
   const workspaceTabs = openWorkspaces.length > 0 && (
     <nav className="workspace-tabs" aria-label="열린 작업공간">
-      {openWorkspaces.map(tab => <div className="workspace-tab" key={tab.workspaceRoot}>
+      {openWorkspaces.map(tab => <div className={`workspace-tab${tabDropTarget?.root === tab.workspaceRoot ? tabDropTarget.after ? " drop-after" : " drop-before" : ""}`} key={tab.workspaceRoot} data-workspace-root={tab.workspaceRoot}>
         <button type="button" className="button" aria-current={tab.workspaceRoot === workspaceRoot ? "page" : undefined}
-          title={tab.workspaceRoot} onClick={() => void openWorkspace(tab.workspaceRoot, true)}>
+          title={tab.workspaceRoot}
+          onPointerDown={event => {
+            suppressTabClickRef.current = false;
+            if (event.button !== 0 || workspaceBusy || transitioningRef.current || choosingRef.current) return;
+            tabDragRef.current = { root: tab.workspaceRoot, pointerId: event.pointerId, startX: event.clientX, moved: false };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={moveWorkspaceTab}
+          onPointerUp={event => finishWorkspaceTabDrag(event)}
+          onPointerCancel={event => finishWorkspaceTabDrag(event, true)}
+          onLostPointerCapture={event => finishWorkspaceTabDrag(event, true)}
+          onDragStart={event => event.preventDefault()}
+          onClick={() => {
+            if (suppressTabClickRef.current) { suppressTabClickRef.current = false; return; }
+            void openWorkspace(tab.workspaceRoot, true);
+          }}>
           {tab.workspaceRoot.split(/[\\/]/).filter(Boolean).pop() ?? tab.workspaceRoot}
         </button>
         <button type="button" className="button workspace-tab-close" aria-label={`${tab.workspaceRoot} 작업공간 닫기`}

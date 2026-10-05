@@ -281,3 +281,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .recent-workspaces { list-style: none; padding: 0; display: grid; gap: 8px; }
 .recent-workspaces li { display: flex; gap: 8px; }
 .recent-workspaces li > :first-child { flex: 1; text-align: left; overflow-wrap: anywhere; min-width: 0; }
+
+.workspace-tab > :first-child { cursor: grab; touch-action: none; user-select: none; }
+.workspace-tab > :first-child:active { cursor: grabbing; }
+.workspace-tab.drop-before { box-shadow: -3px 0 #8ee6a5; }
+.workspace-tab.drop-after { box-shadow: 3px 0 #8ee6a5; }
