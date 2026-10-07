@@ -96,3 +96,38 @@ test("an unavailable active workspace does not prevent the other tabs from resto
   await expect(page.locator('.workspace-tab button[title="D:/A"]')).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("alert")).toContainText("D:/missing");
 });
+
+test("mouse reordering preserves active workspace and persists across reload", async ({ page }) => {
+  await page.goto("http://localhost:1420");
+  await page.getByRole("button", { name: "D:/A", exact: true }).click();
+  await page.getByRole("textbox", { name: "새 Flow", exact: true }).fill("A flow");
+  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: "작업공간 추가하기", exact: true }).click();
+  await page.getByRole("region", { name: "작업공간 추가" }).getByRole("button", { name: "D:/B", exact: true }).click();
+  const a = page.locator('.workspace-tab button[title="D:/A"]');
+  const b = page.locator('.workspace-tab button[title="D:/B"]');
+  const drag = async (after: boolean) => {
+    const start = (await a.boundingBox())!;
+    const end = (await b.locator("..").boundingBox())!;
+    await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(end.x + (after ? end.width - 3 : 3), end.y + end.height / 2, { steps: 10 });
+    await page.mouse.up();
+  };
+  await drag(true);
+  await expect(page.locator(".workspace-tab button[title]")).toHaveText(["B", "A"]);
+  await expect(b).toHaveAttribute("aria-current", "page");
+  await a.click();
+  await expect(page.getByRole("textbox", { name: "Flow 이름", exact: true })).toHaveValue("A flow");
+  await drag(false);
+  await expect(page.locator(".workspace-tab button[title]")).toHaveText(["A", "B"]);
+  await drag(true);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("test-workspace-session") ?? "null"))).toEqual({
+    openWorkspaceRoots: ["D:/B", "D:/A"], activeWorkspaceRoot: "D:/A",
+  });
+  await page.reload();
+  await expect(page.locator(".workspace-tab button[title]")).toHaveText(["B", "A"]);
+  await expect(a).toHaveAttribute("aria-current", "page");
+  await page.getByRole("button", { name: "D:/B 작업공간 닫기", exact: true }).click();
+  await expect(page.locator(".workspace-tab button[title]")).toHaveText(["A"]);
+});
