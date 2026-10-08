@@ -446,7 +446,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(preferences::WindowCache::default())
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed) { preferences::debug_window_event(window, event); }
             if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::CloseRequested { .. }) { preferences::track(window); }
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) { preferences::save_editor_on_close(window); }
             if matches!(event, tauri::WindowEvent::Destroyed) { preferences::forget_window(window); }
         })
         .invoke_handler(tauri::generate_handler![

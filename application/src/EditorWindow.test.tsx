@@ -9,6 +9,7 @@ import type { Editor } from "@tiptap/core";
 
 const mocks = vi.hoisted(() => ({ handlers: new Map<string, (event: { payload: any }) => void>(), emit: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@tauri-apps/api/event", () => ({ emitTo: mocks.emit, listen: vi.fn(async (name, handler) => { mocks.handlers.set(name, handler); return () => mocks.handlers.delete(name); }) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("./storage/repository", () => ({ isDesktopRuntime: () => true }));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root;

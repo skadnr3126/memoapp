@@ -46,7 +46,7 @@ it("restores app UI once before opening the editor and keeps sidebar settings ac
     await act(async () => { host.querySelector<HTMLButtonElement>('.workspace-tab button[title="D:/notes"]')!.click(); });
     expect((host.querySelector(".app-shell") as HTMLElement).style.getPropertyValue("--sidebar-width")).toBe("376px");
     expect(mocks.invoke.mock.calls.filter(call => call[0] === "load_ui_preferences")).toHaveLength(1);
-    expect(mocks.invoke.mock.calls.filter(call => call[0] === "restore_editor_preferences")).toEqual([["restore_editor_preferences"]]);
+    expect(mocks.invoke.mock.calls.filter(call => call[0] === "restore_editor_preferences")).toEqual([]);
     expect(mocks.invoke.mock.calls.some(call => call[0] === "load_workspace_preferences")).toBe(false);
     await act(async () => { await mocks.close!({ preventDefault: vi.fn() }); });
     expect(mocks.invoke).toHaveBeenCalledWith("save_ui_preferences", { preferences: { sidebarWidth: 376, sidebarCollapsed: true } });

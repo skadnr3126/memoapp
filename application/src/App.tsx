@@ -203,7 +203,6 @@ function App() {
     editorOpeningRef.current = opening;
     try {
       await opening;
-      await invoke("restore_editor_preferences");
     } finally {
       editorOpeningRef.current = undefined;
     }

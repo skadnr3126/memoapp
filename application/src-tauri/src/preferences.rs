@@ -2,6 +2,31 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path, sync::Mutex};
 use tauri::{Manager, PhysicalPosition, PhysicalSize};
 
+macro_rules! diagnostic {
+    ($app:expr, $event:expr, $details:expr) => {
+        #[cfg(debug_assertions)]
+        debug_log($app, $event, $details);
+    };
+}
+
+#[cfg(debug_assertions)]
+fn debug_log(app: &tauri::AppHandle, event: &str, details: serde_json::Value) {
+    use std::io::Write;
+    let Ok(directory) = app.path().app_config_dir() else { return; };
+    let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(directory.join("ui-state-debug.log")) else { return; };
+    let record = serde_json::json!({
+        "timeMs": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or_default(),
+        "pid": std::process::id(), "event": event, "details": details,
+    });
+    let _ = writeln!(file, "{record}");
+}
+
+pub fn debug_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    diagnostic!(window.app_handle(), "window-event", serde_json::json!({"label": window.label(), "event": format!("{event:?}")}));
+    #[cfg(not(debug_assertions))]
+    let _ = (window, event);
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Geometry {
     x: i32, y: i32, width: u32, height: u32, maximized: bool,
@@ -53,7 +78,10 @@ fn load_shared(path: &Path, legacy: Option<&Path>) -> Result<Preferences, String
 fn ensure_loaded(app: &tauri::AppHandle) -> Result<Preferences, String> {
     let state = app.state::<WindowCache>();
     let mut cache = state.0.lock().map_err(|e| e.to_string())?;
-    if let Some(value) = &cache.value { return Ok(value.clone()); }
+    if let Some(value) = &cache.value {
+        diagnostic!(app, "load", serde_json::json!({"source": "cache", "path": settings_path(app).ok(), "editor": value.windows.get("editor")}));
+        return Ok(value.clone());
+    }
     let _storage = super::STORAGE_LOCK.lock().map_err(|e| e.to_string())?;
     let directory = app.path().app_config_dir().map_err(|e| e.to_string())?;
     let path = settings_path(app)?;
@@ -62,6 +90,7 @@ fn ensure_loaded(app: &tauri::AppHandle) -> Result<Preferences, String> {
         legacy_path(&directory, home.as_deref())?
     };
     let value = load_shared(&path, legacy.as_deref())?;
+    diagnostic!(app, "load", serde_json::json!({"source": "disk", "path": path, "legacy": legacy, "editor": value.windows.get("editor")}));
     cache.value = Some(value.clone());
     Ok(value)
 }
@@ -81,43 +110,93 @@ fn save_shared(path: &Path, preferences: super::UiPreferences, windows: &HashMap
     Ok(value)
 }
 fn apply(window: &tauri::WebviewWindow, g: &Geometry) -> Result<(), String> {
+    macro_rules! native_step {
+        ($operation:literal, $call:expr) => {{
+            let result = $call;
+            diagnostic!(window.app_handle(), "restore-step", serde_json::json!({"label": window.label(), "operation": $operation, "result": result.as_ref().map(|_| ()).map_err(|e| e.to_string())}));
+            result.map_err(|e| e.to_string())?
+        }};
+    }
     if g.width < 100 || g.height < 100 || g.width > 20000 || g.height > 20000 { return Err("잘못된 창 크기입니다.".into()); }
-    window.unmaximize().map_err(|e| e.to_string())?;
-    window.set_size(PhysicalSize::new(g.width, g.height)).map_err(|e| e.to_string())?;
-    let visible = window.available_monitors().map_err(|e| e.to_string())?.iter().any(|m| {
+    native_step!("unmaximize", window.unmaximize());
+    native_step!("set_size", window.set_size(PhysicalSize::new(g.width, g.height)));
+    let visible = native_step!("available_monitors", window.available_monitors()).iter().any(|m| {
         let p = m.position(); let s = m.size();
         i64::from(g.x) < i64::from(p.x) + i64::from(s.width) && i64::from(g.x) + i64::from(g.width) > i64::from(p.x)
             && i64::from(g.y) < i64::from(p.y) + i64::from(s.height) && i64::from(g.y) + i64::from(g.height) > i64::from(p.y)
     });
-    if visible { window.set_position(PhysicalPosition::new(g.x, g.y)).map_err(|e| e.to_string())?; }
-    else { window.center().map_err(|e| e.to_string())?; }
-    if g.maximized { window.maximize().map_err(|e| e.to_string())?; }
+    diagnostic!(window.app_handle(), "restore-placement", serde_json::json!({"label": window.label(), "visible": visible, "geometry": g}));
+    if visible { native_step!("set_position", window.set_position(PhysicalPosition::new(g.x, g.y))); }
+    else { native_step!("center", window.center()); }
+    if g.maximized { native_step!("maximize", window.maximize()); }
     Ok(())
 }
 pub fn track(window: &tauri::Window) {
-    if window.is_minimized().unwrap_or(true) { return; }
+    if window.is_minimized().unwrap_or(true) {
+        diagnostic!(window.app_handle(), "track-skip", serde_json::json!({"label": window.label(), "reason": "minimized-or-getter-error"}));
+        return;
+    }
     let maximized = window.is_maximized().unwrap_or(false);
     let cache = window.state::<WindowCache>();
     let Ok(mut cache) = cache.0.lock() else { return; };
-    if !cache.ready_windows.contains(window.label()) || cache.restoring.contains(window.label()) { return; }
-    let Some(value) = cache.value.as_mut() else { return; };
+    if !cache.ready_windows.contains(window.label()) || cache.restoring.contains(window.label()) {
+        diagnostic!(window.app_handle(), "track-skip", serde_json::json!({"label": window.label(), "reason": if !cache.ready_windows.contains(window.label()) { "not-ready" } else { "restoring" }, "ready": cache.ready_windows.contains(window.label()), "restoring": cache.restoring.contains(window.label())}));
+        return;
+    }
+    let Some(value) = cache.value.as_mut() else {
+        diagnostic!(window.app_handle(), "track-skip", serde_json::json!({"label": window.label(), "reason": "cache-unloaded"}));
+        return;
+    };
     if maximized {
         if let Some(g) = value.windows.get_mut(window.label()) { g.maximized = true; }
-    } else if let (Ok(p), Ok(s)) = (window.outer_position(), window.inner_size()) {
-        if s.width >= 100 && s.height >= 100 && s.width <= 20000 && s.height <= 20000 {
-            value.windows.insert(window.label().into(), Geometry { x: p.x, y: p.y, width: s.width, height: s.height, maximized });
+    } else {
+        let position = window.outer_position();
+        let size = window.inner_size();
+        diagnostic!(window.app_handle(), "track-read", serde_json::json!({"label": window.label(), "position": format!("{position:?}"), "size": format!("{size:?}")}));
+        if let (Ok(p), Ok(s)) = (position, size) {
+            if s.width >= 100 && s.height >= 100 && s.width <= 20000 && s.height <= 20000 {
+                value.windows.insert(window.label().into(), Geometry { x: p.x, y: p.y, width: s.width, height: s.height, maximized });
+            }
         }
     }
+    diagnostic!(window.app_handle(), "track", serde_json::json!({"label": window.label(), "geometry": value.windows.get(window.label())}));
 }
 pub fn forget_window(window: &tauri::Window) {
+    diagnostic!(window.app_handle(), "forget-window", serde_json::json!({"label": window.label()}));
     if let Ok(mut cache) = window.state::<WindowCache>().0.lock() { cache.ready_windows.remove(window.label()); }
 }
+pub fn save_editor_on_close(window: &tauri::Window) {
+    if window.label() != "editor" { return; }
+    let state = window.state::<WindowCache>();
+    let preferences = {
+        let Ok(cache) = state.0.lock() else { return; };
+        if !cache.ready_windows.contains("editor") { return; }
+        let Some(value) = &cache.value else { return; };
+        value.clone()
+    };
+    let result = (|| {
+        let _storage = super::STORAGE_LOCK.lock().map_err(|e| e.to_string())?;
+        save_shared(&settings_path(window.app_handle())?, super::UiPreferences {
+            sidebar_width: preferences.sidebar_width,
+            sidebar_collapsed: preferences.sidebar_collapsed,
+        }, &preferences.windows)?;
+        Ok::<(), String>(())
+    })();
+    diagnostic!(window.app_handle(), "editor-close-save", serde_json::json!({"editor": preferences.windows.get("editor"), "result": result}));
+    if let Err(error) = result { eprintln!("편집 창 위치 저장 실패: {error}"); }
+}
 fn restore_window(app: &tauri::AppHandle, label: &str) -> Result<(), String> {
+    diagnostic!(app, "restore-request", serde_json::json!({"label": label}));
     let preferences = ensure_loaded(app)?;
-    let Some(window) = app.get_webview_window(label) else { return Ok(()); };
+    let Some(window) = app.get_webview_window(label) else {
+        diagnostic!(app, "restore-window-missing", serde_json::json!({"label": label}));
+        return Ok(());
+    };
+    diagnostic!(app, "restore-start", serde_json::json!({"label": label, "geometry": preferences.windows.get(label)}));
     let state = app.state::<WindowCache>();
     state.0.lock().map_err(|e| e.to_string())?.restoring.insert(label.into());
     let result = if let Some(geometry) = preferences.windows.get(label) { apply(&window, geometry) } else { Ok(()) };
+    diagnostic!(app, "restore-result", serde_json::json!({"label": label, "result": result}));
     {
         let mut cache = state.0.lock().map_err(|e| e.to_string())?;
         cache.restoring.remove(label);
@@ -148,6 +227,7 @@ pub fn save_ui_preferences(app: tauri::AppHandle, preferences: super::UiPreferen
         let _lock = super::STORAGE_LOCK.lock().map_err(|e| e.to_string())?;
         save_shared(&settings_path(&app)?, preferences, &windows)?
     };
+    diagnostic!(&app, "save", serde_json::json!({"path": settings_path(&app).ok(), "editor": value.windows.get("editor")}));
     let mut cache = state.0.lock().map_err(|e| e.to_string())?;
     if let Some(cached) = &mut cache.value { cached.sidebar_width = value.sidebar_width; cached.sidebar_collapsed = value.sidebar_collapsed; }
     Ok(())
@@ -231,6 +311,24 @@ mod tests {
         assert_eq!(restored.windows["editor"], imported.windows["editor"]);
         assert_eq!(restored.windows["main"].width, 1200);
         assert_eq!(restored.windows["main"].x, 40);
+    }
+
+    #[test]
+    fn saving_last_editor_geometry_preserves_main_window_and_sidebar() {
+        let temp = super::super::tests::Temp::new();
+        let path = temp.0.join("config/ui-state.json");
+        super::super::write_atomic(&path, r#"{"sidebarWidth":360,"sidebarCollapsed":true,"windows":{"main":{"x":40,"y":50,"width":1200,"height":800,"maximized":false},"editor":{"x":300,"y":60,"width":720,"height":900,"maximized":false}}}"#).unwrap();
+        let cached = load_shared(&path, None).unwrap();
+        let last_editor = Geometry { x: 600, y: 200, width: 850, height: 700, maximized: false };
+        save_shared(&path, super::super::UiPreferences {
+            sidebar_width: cached.sidebar_width,
+            sidebar_collapsed: cached.sidebar_collapsed,
+        }, &HashMap::from([("editor".into(), last_editor.clone())])).unwrap();
+        let saved: Preferences = read(&path).unwrap();
+        assert_eq!(saved.windows["editor"], last_editor);
+        assert_eq!(saved.windows["main"], cached.windows["main"]);
+        assert_eq!(saved.sidebar_width, Some(360.0));
+        assert_eq!(saved.sidebar_collapsed, Some(true));
     }
 
     #[test]

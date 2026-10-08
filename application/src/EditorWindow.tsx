@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { isDesktopRuntime } from "./storage/repository";
 import {
   EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED,
@@ -17,6 +18,7 @@ export function EditorWindow() {
   const [suspended, setSuspended] = useState(false);
   const suspendedRef = useRef(false);
   const [status, setStatus] = useState("변경 내용은 1초마다 자동 저장됩니다.");
+  const [startupError, setStartupError] = useState<string>();
   const currentRef = useRef<EditorSession | undefined>(undefined);
   const draftsRef = useRef(new Map<string, EditorSaveRequest>());
   const pendingRef = useRef(new Set<string>());
@@ -122,7 +124,11 @@ export function EditorWindow() {
         return;
       }
       unlisten = stop;
-      void Promise.all([ready, flushReady, lockReady]).then(() => { if (!disposed) void emitTo("main", EDITOR_READY); });
+      void Promise.all([ready, flushReady, lockReady]).then(async () => {
+        if (disposed) return;
+        await invoke("restore_editor_preferences");
+        if (!disposed) await emitTo("main", EDITOR_READY);
+      }).catch(error => { if (!disposed) setStartupError(`편집 창 위치 복원 실패: ${String(error)}`); });
     });
     const timer = window.setInterval(flush, 1000);
     window.addEventListener("blur", flush);
@@ -162,6 +168,7 @@ export function EditorWindow() {
         <section className="editor-window-empty">
           <p>메인 창에서 노드를 선택하세요.</p>
           <small>선택한 노드의 내용이 이 창에 표시됩니다.</small>
+          {startupError && <p role="status">{startupError}</p>}
         </section>
       )}
       {suspended && <p role="status" className="editor-transfer-status">플로우를 안전하게 이동하는 중…</p>}
