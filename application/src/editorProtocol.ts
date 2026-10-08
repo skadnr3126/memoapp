@@ -10,6 +10,7 @@ export const EDITOR_SAVE = "editor:save";
 export const EDITOR_SAVED = "editor:saved";
 export const EDITOR_FLUSH = "editor:flush";
 export const EDITOR_FLUSHED = "editor:flushed";
+export const EDITOR_RESUME = "editor:resume";
 export type EditorFlushResult = { requestId: string; error?: string };
 export type EditorSaveResult = { request: EditorSaveRequest; error?: string };
 

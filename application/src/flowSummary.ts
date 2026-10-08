@@ -13,7 +13,7 @@ export function flowSummaryInput(workspace: WorkspaceState, flowId: string) {
   };
 }
 
-export async function flushEditor() {
+export async function flushEditor(suspend = false) {
   const requestId = crypto.randomUUID();
   let resolve!: () => void;
   let reject!: (error: Error) => void;
@@ -24,6 +24,6 @@ export async function flushEditor() {
   });
   const timer = window.setTimeout(() => reject(new Error("편집 창 저장 확인 시간이 초과되었습니다. 편집 내용을 저장한 뒤 다시 시도하세요.")), 10000);
   try {
-    await Promise.all([completed, emitTo("editor", EDITOR_FLUSH, { requestId })]);
+    await Promise.all([completed, emitTo("editor", EDITOR_FLUSH, { requestId, suspend })]);
   } finally { window.clearTimeout(timer); stop(); }
 }

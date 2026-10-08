@@ -47,3 +47,4 @@
 .editor-window-content footer small { font-size: 11px; }
 .editor-window-empty { padding: 35vh 24px 0; text-align: center; color: #819086; }
 .editor-window-empty p { color: #526358; }
+.editor-transfer-status { position: fixed; inset: 0; margin: 0; display: grid; place-items: center; background: #fffefbe8; color: #31583a; font-weight: 600; z-index: 20; }

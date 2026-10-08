@@ -8,6 +8,19 @@ const mockInvoke=vi.mocked(invoke);
 const original={workspaceRoot:"D:/notes",blockFiles:[{relativePath:"blocks/A.md",content:serializeBlock({id:"A",markdown:"body",createdAt:"2026-01-01T00:00:00Z",updatedAt:"2026-01-01T00:00:00Z"})}],flowFiles:[{relativePath:"flows/F.json",content:JSON.stringify({version:1,id:"F",title:"F",root:{id:"root",items:["A"],branches:{}}})}]};
 beforeEach(()=>{mockInvoke.mockReset();Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});});
 describe("native migration boundary",()=>{
+  it("stores each flow with its own blocks and layout and rejects mismatched ownership",()=>{
+    const decoded=decodeWorkspace(original);
+    const positions={F:{A:{x:120,y:240,width:400,height:200}}};
+    const viewports={F:{zoom:0.75,scrollLeft:300,scrollTop:150}};
+    const saved=snapshotFor(decoded.workspace,positions,viewports);
+    expect(saved.blockFiles[0].relativePath).toBe("flows/F/blocks/2026/01/A.md");
+    expect(saved.flowFiles.map(file=>file.relativePath)).toEqual(["flows/F/flow.json","flows/F/layout.json"]);
+    const loaded=decodeWorkspace({...saved,workspaceRoot:"D:/Library"});
+    expect(loaded.needsMigration).toBe(false);
+    expect(loaded.nodePositionsByFlow.F.A).toEqual({x:120,y:240,width:400,height:200});
+    expect(loaded.viewportByFlow.F).toEqual({zoom:0.75,scrollLeft:300,scrollTop:150});
+    expect(()=>decodeWorkspace({...saved,workspaceRoot:"D:/Library",blockFiles:saved.blockFiles.map(file=>({...file,relativePath:"flows/Other/blocks/A.md"}))})).toThrow("다른 저장 폴더");
+  });
   it("validates, migrates, then reads back before exposing the workspace",async()=>{
     const decoded=decodeWorkspace(original);
     const migrated={...snapshotFor(decoded.workspace,decoded.nodePositionsByFlow),workspaceRoot:"D:/notes"};

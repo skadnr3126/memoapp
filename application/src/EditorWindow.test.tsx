@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { EditorWindow } from "./EditorWindow";
 import { EDITOR_LOAD, EDITOR_SAVE, EDITOR_SAVED, EDITOR_FLUSH, EDITOR_FLUSHED } from "./editorProtocol";
-import { EDITOR_CLEAR, EDITOR_LOCK, EDITOR_LOCKED } from "./editorProtocol";
+import { EDITOR_CLEAR, EDITOR_LOCK, EDITOR_LOCKED, EDITOR_RESUME } from "./editorProtocol";
 import type { Editor } from "@tiptap/core";
 
 const mocks = vi.hoisted(() => ({ handlers: new Map<string, (event: { payload: any }) => void>(), emit: vi.fn().mockResolvedValue(undefined) }));
@@ -207,6 +207,26 @@ it("pastes markdown into formatted content and continues and exits a list with E
   enter();
   expect(host.querySelectorAll("li")).toHaveLength(1);
   expect(editor.isActive("bulletList")).toBe(false);
+});
+it("suspends editing before the move flush and keeps the acknowledged draft until the new session resumes", async () => {
+  edit("이동 직전 내용");
+  act(() => mocks.handlers.get(EDITOR_FLUSH)!({ payload: { requestId: "move", suspend: true } }));
+  expect(host.querySelector("form")?.hasAttribute("inert")).toBe(true);
+  expect(saves()[0][2].markdown).toBe("이동 직전 내용");
+  expect(flushed()).toHaveLength(0);
+  edit("이동 중 입력");
+  act(() => mocks.handlers.get(EDITOR_SAVED)!({ payload: { request: saves()[0][2] } }));
+  expect(flushed()[0][2]).toEqual({ requestId: "move" });
+  await act(async () => vi.advanceTimersByTime(1000));
+  expect(saves()).toHaveLength(1);
+  act(() => mocks.handlers.get(EDITOR_CLEAR)!({ payload: undefined }));
+  load("new-session", "이동 직전 내용");
+  expect(host.querySelector("form")?.hasAttribute("inert")).toBe(true);
+  act(() => mocks.handlers.get(EDITOR_RESUME)!({ payload: undefined }));
+  expect(host.querySelector("form")?.hasAttribute("inert")).toBe(false);
+  edit("이동 후 내용");
+  await act(async () => vi.advanceTimersByTime(1000));
+  expect(saves()[1][2]).toMatchObject({ sessionId: "new-session", markdown: "이동 후 내용" });
 });
 
 it("keeps plain text paste in the current line and places the caret by a page click", () => {

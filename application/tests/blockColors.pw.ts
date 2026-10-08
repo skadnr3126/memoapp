@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("right-click palette changes colors, supports undo, and preserves color when copying blocks", async ({ page }) => {
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: "+ 새 플로우", exact: true }).click();
   await page.locator(".flow-canvas-scroll").hover({ position: { x: 300, y: 250 } });
   await page.keyboard.press("Control+t");
   const nodes = page.locator(".flow-node");

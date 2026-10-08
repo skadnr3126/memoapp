@@ -286,3 +286,26 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .workspace-tab > :first-child:active { cursor: grabbing; }
 .workspace-tab.drop-before { box-shadow: -3px 0 #8ee6a5; }
 .workspace-tab.drop-after { box-shadow: 3px 0 #8ee6a5; }
+.sidebar { height: 100vh; min-height: 0; gap: 18px; padding: 24px 16px; }
+.app-shell:has(> .workspace-tabs) .sidebar { height: calc(100vh - 42px); }
+.sidebar > .brand, .sidebar > .independent-create, .sidebar-footer { flex: none; }
+.sidebar .flow-list { display: block; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #53695e transparent; }
+.flow-group { margin-bottom: 12px; padding: 4px; border: 1px solid transparent; border-radius: 9px; }
+.flow-group.is-drop-target { border-color: #a3dca9; background: #36513f; box-shadow: 0 0 0 2px #a3dca933; }
+.flow-group-heading { display: flex; align-items: center; gap: 5px; }
+.flow-group-toggle { flex: 1; min-width: 0; padding: 9px 4px; border: 0; color: #c9d7ce; background: transparent; font-size: .78rem; text-align: left; }
+.flow-group-toggle small { color: #8eab97; margin-left: 6px; }
+.flow-group-toggle:focus-visible { outline: 2px solid #8ebf96; outline-offset: -2px; border-radius: 5px; }
+.flow-group-add { padding: 3px 8px; color: #c9d7ce; background: #334c3d; font-size: 1rem; }
+.flow-group-items { display: grid; gap: 4px; padding-top: 2px; }
+.flow-group-empty { margin: 5px 8px 9px; color: #8eab97; font-size: .7rem; line-height: 1.5; }
+.workspace-groups-toggle { width: 100%; margin-top: 4px; border-top: 1px solid #40584c; }
+.flow-list-item { touch-action: none; user-select: none; cursor: grab; }
+.flow-list-item:active { cursor: grabbing; }
+.flow-membership { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 7px; border: 1px solid #cad9cc; border-radius: 5px; color: #617267; font-size: .7rem; }
+.flow-transfer-overlay { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; background: #f7f5f0b8; backdrop-filter: blur(2px); }
+.flow-transfer-overlay > div { max-width: min(520px, 90vw); padding: 24px 30px; border: 1px solid #c8d7c7; border-radius: 12px; background: #fffefb; box-shadow: 0 12px 40px #10201526; text-align: center; }
+.flow-transfer-overlay p { line-height: 1.6; }
+.transfer-spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid #d6e0d3; border-top-color: #347a4a; border-radius: 50%; animation: transfer-spin 1s linear infinite; }
+@keyframes transfer-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .transfer-spinner { animation: none; } }

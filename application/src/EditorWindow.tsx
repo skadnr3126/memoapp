@@ -3,7 +3,7 @@ import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isDesktopRuntime } from "./storage/repository";
 import {
   EDITOR_CLEAR, EDITOR_LOAD, EDITOR_READY, EDITOR_SAVE, EDITOR_SAVED,
-  EDITOR_FLUSH, EDITOR_FLUSHED, EDITOR_LOCK, EDITOR_LOCKED,
+  EDITOR_FLUSH, EDITOR_FLUSHED, EDITOR_LOCK, EDITOR_LOCKED, EDITOR_RESUME,
   type EditorSaveResult, type EditorSaveRequest, type EditorSession, type EditorLockState,
 } from "./editorProtocol";
 import "./EditorWindow.css";
@@ -14,6 +14,8 @@ export function EditorWindow() {
   const [markdown, setMarkdown] = useState("");
   const [locked, setLocked] = useState(false);
   const [lockPending, setLockPending] = useState(false);
+  const [suspended, setSuspended] = useState(false);
+  const suspendedRef = useRef(false);
   const [status, setStatus] = useState("변경 내용은 1초마다 자동 저장됩니다.");
   const currentRef = useRef<EditorSession | undefined>(undefined);
   const draftsRef = useRef(new Map<string, EditorSaveRequest>());
@@ -40,6 +42,7 @@ export function EditorWindow() {
     }
   };
   const change = (nextMarkdown: string) => {
+    if (suspendedRef.current) return;
     const current = currentRef.current;
     if (!current) return;
     setMarkdown(nextMarkdown);
@@ -67,16 +70,19 @@ export function EditorWindow() {
     let savedListener: UnlistenFn | undefined;
     let flushListener: UnlistenFn | undefined;
     let lockListener: UnlistenFn | undefined;
+    let resumeListener: UnlistenFn | undefined;
     let disposed = false;
     const lockReady = listen<EditorLockState>(EDITOR_LOCKED, ({ payload }) => {
       if (payload.sessionId !== currentRef.current?.sessionId) return;
       setLocked(payload.locked);
       setLockPending(false);
     }).then(stop => { if (disposed) stop(); else lockListener = stop; });
-    const flushReady = listen<{ requestId: string }>(EDITOR_FLUSH, ({ payload }) => {
+    const flushReady = listen<{ requestId: string; suspend?: boolean }>(EDITOR_FLUSH, ({ payload }) => {
+      if (payload.suspend) { suspendedRef.current = true; setSuspended(true); setStatus("플로우 이동을 위해 편집 내용을 저장하는 중…"); }
       flushRequestsRef.current.add(payload.requestId);
       flush(); confirmFlush();
     }).then(stop => { if (disposed) stop(); else flushListener = stop; });
+    void listen(EDITOR_RESUME, () => { suspendedRef.current = false; setSuspended(false); }).then(stop => { if (disposed) stop(); else resumeListener = stop; });
     void listen(EDITOR_CLEAR, () => { confirmFlush("편집 세션이 변경되었습니다. 다시 시도하세요."); currentRef.current = undefined; draftsRef.current.clear(); pendingRef.current.clear(); setSession(undefined); setMarkdown(""); setLocked(false); setLockPending(false); }).then((stop) => { if (disposed) stop(); else clearListener = stop; });
     const ready = listen<EditorSaveResult>(EDITOR_SAVED, ({ payload: { request, error } }) => {
       pendingRef.current.delete(request.sessionId);
@@ -128,6 +134,7 @@ export function EditorWindow() {
       savedListener?.();
       flushListener?.();
       lockListener?.();
+      resumeListener?.();
       window.clearInterval(timer);
       window.removeEventListener("blur", flush);
     };
@@ -143,7 +150,7 @@ export function EditorWindow() {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); flush(); }
     }}>
       {session ? (
-        <form className="editor-window-content" onSubmit={save}>
+        <form className="editor-window-content" onSubmit={save} inert={suspended} aria-busy={suspended}>
           <MarkdownDocument key={session.sessionId} title={session.title} markdown={markdown} onChange={change}
             toolbar={<button type="button" aria-pressed={locked} disabled={lockPending} onClick={toggleLock}
               title={locked ? "잠금 해제 후 다음 블록 선택부터 전환됩니다." : "다른 블록을 선택해도 이 문서를 유지합니다."}>
@@ -157,6 +164,7 @@ export function EditorWindow() {
           <small>선택한 노드의 내용이 이 창에 표시됩니다.</small>
         </section>
       )}
+      {suspended && <p role="status" className="editor-transfer-status">플로우를 안전하게 이동하는 중…</p>}
     </main>
   );
 }

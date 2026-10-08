@@ -11,11 +11,12 @@ test("summary text copies the current selection even while a block remains selec
         transformCallback() { return ++callbackId; },
         unregisterCallback() {},
         async invoke(command: string, args: Record<string, unknown> = {}) {
+          if (command === "independent_workspace_root") return "D:/summary-test";
           if (command === "recent_workspaces") return ["D:/summary-test"];
           if (command === "workspace_session") return { openWorkspaceRoots: [], activeWorkspaceRoot: null };
           if (command === "resolve_workspace_root") return args.workspaceRoot;
           if (command === "open_workspace") return { workspaceRoot: args.workspaceRoot, blockFiles: [], flowFiles: [] };
-          if (command === "load_workspace_preferences") return { sidebarWidth: 292 };
+          if (command === "load_ui_preferences") return { sidebarWidth: 292, sidebarCollapsed: false };
           if (command === "load_flow_summary") return { path: "D:/summary-test/.memo/ai/summaries/test.md", markdown: "First summary passage.\nSecond summary passage." };
           if (command === "plugin:window|get_all_windows") return ["main", "editor"];
           if (command === "plugin:event|listen") return ++callbackId;
@@ -24,8 +25,7 @@ test("summary text copies the current selection even while a block remains selec
     });
   });
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "D:/summary-test", exact: true }).click();
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: "+ 새 플로우", exact: true }).click();
   await page.locator(".flow-canvas-scroll").hover({ position: { x: 300, y: 250 } });
   await page.keyboard.press("Control+t");
   await expect(page.locator(".flow-node.is-selected")).toHaveCount(1);
@@ -58,7 +58,7 @@ test("summary text copies the current selection even while a block remains selec
 
 test("pastes at the pointer even when an existing block occupies that position", async ({ page }) => {
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: "+ 새 플로우", exact: true }).click();
   await page.locator(".flow-canvas-scroll").hover({ position: { x: 300, y: 250 } });
   await page.keyboard.press("Control+t");
   const nodes = page.locator(".flow-node");
@@ -81,7 +81,7 @@ test("pastes at the pointer even when an existing block occupies that position",
 test("marquee selection copies and cuts multiple blocks with keyboard shortcuts", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: "+ 새 플로우", exact: true }).click();
   const canvas = page.locator(".flow-canvas-scroll");
   await canvas.hover({ position: { x: 250, y: 200 } });
   await page.keyboard.press("Control+t");

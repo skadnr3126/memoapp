@@ -1,49 +1,54 @@
 import { expect, test } from "@playwright/test";
+import { addWorkspace, dragFlow, installNativeFlowMock } from "./nativeFlowMock";
 
 test.beforeEach(async ({ page }) => {
-  // Browser UI coverage with simulated IPC; native window behavior needs desktop QA.
-  await page.addInitScript(() => {
-    let callbackId = 0;
-    const callbacks = new Map<number, (event: unknown) => void>();
-    Object.assign(window, {
-      __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener() {} },
-      __TAURI_INTERNALS__: {
-        metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
-        transformCallback(callback: (event: unknown) => void) { callbacks.set(++callbackId, callback); return callbackId; },
-        unregisterCallback(id: number) { callbacks.delete(id); },
-        async invoke(command: string, args: Record<string, any> = {}) {
-          if (command === "recent_workspaces") return ["D:/A", "D:/B"];
-          if (command === "workspace_session") {
-            if (args.session) localStorage.setItem("test-workspace-session", JSON.stringify(args.session));
-            return JSON.parse(localStorage.getItem("test-workspace-session") ?? '{"openWorkspaceRoots":[],"activeWorkspaceRoot":null}');
-          }
-          if (command === "resolve_workspace_root") {
-            if (args.workspaceRoot === "D:/missing") throw new Error("작업공간 폴더가 존재하지 않습니다.");
-            return args.workspaceRoot;
-          }
-          if (command === "plugin:window|get_all_windows") return ["main", "editor"];
-          if (command === "plugin:event|listen") return ++callbackId;
-          if (command === "plugin:dialog|open") return "D:/B";
-          if (command === "load_workspace_preferences") return { sidebarWidth: 292 };
-          if (command === "open_workspace") return { workspaceRoot: args.workspaceRoot, blockFiles: [], flowFiles: [] };
-        },
-      },
-    });
-  });
+  await installNativeFlowMock(page);
   await page.setViewportSize({ width: 1280, height: 850 });
+});
+
+test("app UI preferences stay shared through workspace switches, flow moves and reload", async ({ page }) => {
+  await page.goto("http://localhost:1420");
+  await page.getByRole("button", { name: "+ 새 플로우", exact: true }).click();
+  await page.getByRole("textbox", { name: "Flow 이름", exact: true }).fill("독립 메모");
+  await addWorkspace(page, "D:/A");
+  await page.getByRole("button", { name: "A에 새 플로우", exact: true }).click();
+  await addWorkspace(page, "D:/B");
+  const separator = page.getByRole("separator", { name: "사이드바 너비 조절" });
+  await separator.focus(); await separator.press("ArrowRight"); await separator.press("ArrowRight");
+  await expect(page.locator(".app-shell")).toHaveCSS("--sidebar-width", "324px");
+  await page.getByRole("button", { name: "사이드바 접기", exact: true }).click();
+  await page.locator('.workspace-tab button[title="D:/A"]').click();
+  await expect(page.locator(".app-shell")).toHaveClass(/sidebar-collapsed/);
+  await expect(page.locator(".app-shell")).toHaveCSS("--sidebar-width", "324px");
+  await page.locator('.workspace-tab button[title="D:/B"]').click();
+  await expect(page.locator(".app-shell")).toHaveClass(/sidebar-collapsed/);
+  await page.getByRole("button", { name: "사이드바 펼치기", exact: true }).click();
+  await page.getByRole("region", { name: "독립 플로우", exact: true }).getByRole("button", { name: "독립 메모 0 nodes", exact: true }).click();
+  page.once("dialog", dialog => dialog.accept());
+  await dragFlow(page, page.locator('[data-flow-target="D:/Library"] .flow-list-item').first(), page.getByRole("region", { name: "A", exact: true }));
+  await expect(page.getByRole("region", { name: "A", exact: true }).getByRole("button", { name: "독립 메모 0 nodes", exact: true })).toBeVisible();
+  await expect(page.locator(".app-shell")).toHaveCSS("--sidebar-width", "324px");
+  const restorations = () => page.evaluate(() => JSON.parse(localStorage.getItem("test-command-log") ?? "[]").filter((command: string) => command === "load_ui_preferences" || command === "restore_editor_preferences"));
+  expect(await restorations()).toEqual(["load_ui_preferences"]);
+  await page.getByRole("button", { name: "사이드바 접기", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("test-ui-preferences") ?? "null"))).toEqual({ sidebarWidth: 324, sidebarCollapsed: true });
+  await page.reload();
+  await expect(page.locator(".app-shell")).toHaveClass(/sidebar-collapsed/);
+  await expect(page.locator(".app-shell")).toHaveCSS("--sidebar-width", "324px");
+  expect(await restorations()).toEqual(["load_ui_preferences", "load_ui_preferences"]);
 });
 
 test("workspace tabs add, switch, deduplicate and close through the rendered UI", async ({ page }) => {
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "D:/A", exact: true }).click();
-  await page.getByRole("textbox", { name: "새 Flow", exact: true }).fill("A flow");
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await addWorkspace(page, "D:/A");
+  await page.getByRole("button", { name: "A에 새 플로우", exact: true }).click();
+  await page.getByRole("textbox", { name: "Flow 이름", exact: true }).fill("A flow");
   await page.getByRole("button", { name: "작업공간 추가하기", exact: true }).click();
   await expect(page.getByRole("region", { name: "작업공간 추가", exact: true })).toBeVisible();
   await page.getByRole("region", { name: "작업공간 추가", exact: true }).getByRole("button", { name: "D:/B", exact: true }).click();
   await expect(page.locator(".workspace-tab")).toHaveCount(2);
-  await page.getByRole("textbox", { name: "새 Flow", exact: true }).fill("B flow");
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: "B에 새 플로우", exact: true }).click();
+  await page.getByRole("textbox", { name: "Flow 이름", exact: true }).fill("B flow");
   await page.locator('.workspace-tab button[title="D:/A"]').click();
   await expect(page.getByRole("textbox", { name: "Flow 이름", exact: true })).toHaveValue("A flow");
   await page.getByRole("button", { name: "작업공간 추가하기", exact: true }).click();
@@ -60,7 +65,7 @@ test("workspace tabs add, switch, deduplicate and close through the rendered UI"
 
 test("open tabs and the active workspace survive reloads, including closing the last tab", async ({ page }) => {
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "D:/A", exact: true }).click();
+  await addWorkspace(page, "D:/A");
   await page.getByRole("button", { name: "작업공간 추가하기", exact: true }).click();
   await page.getByRole("region", { name: "작업공간 추가" }).getByRole("button", { name: "D:/B", exact: true }).click();
   await page.locator('.workspace-tab button[title="D:/A"]').click();
@@ -81,27 +86,28 @@ test("open tabs and the active workspace survive reloads, including closing the 
     openWorkspaceRoots: [], activeWorkspaceRoot: null,
   });
   await page.reload();
-  await expect(page.getByRole("heading", { name: "생각을 저장할 폴더를 선택하세요." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ 새 플로우", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "독립 플로우", exact: true })).toBeVisible();
   await expect(page.locator(".workspace-tab")).toHaveCount(0);
 });
 
 test("an unavailable active workspace does not prevent the other tabs from restoring", async ({ page }) => {
   await page.goto("http://localhost:1420");
-  await expect(page.getByRole("heading", { name: "생각을 저장할 폴더를 선택하세요." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ 새 플로우", exact: true })).toBeVisible();
   await page.evaluate(() => localStorage.setItem("test-workspace-session", JSON.stringify({
     openWorkspaceRoots: ["D:/A", "D:/missing", "D:/B", "D:/A"], activeWorkspaceRoot: "D:/missing",
   })));
   await page.reload();
   await expect(page.locator(".workspace-tab button[title]")).toHaveText(["A", "B"]);
-  await expect(page.locator('.workspace-tab button[title="D:/A"]')).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("region", { name: "독립 플로우", exact: true })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("D:/missing");
 });
 
 test("mouse reordering preserves active workspace and persists across reload", async ({ page }) => {
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "D:/A", exact: true }).click();
-  await page.getByRole("textbox", { name: "새 Flow", exact: true }).fill("A flow");
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await addWorkspace(page, "D:/A");
+  await page.getByRole("button", { name: "A에 새 플로우", exact: true }).click();
+  await page.getByRole("textbox", { name: "Flow 이름", exact: true }).fill("A flow");
   await page.getByRole("button", { name: "작업공간 추가하기", exact: true }).click();
   await page.getByRole("region", { name: "작업공간 추가" }).getByRole("button", { name: "D:/B", exact: true }).click();
   const a = page.locator('.workspace-tab button[title="D:/A"]');

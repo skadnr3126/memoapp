@@ -18,7 +18,7 @@ beforeEach(async () => {
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(2000);
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   await act(async () => { root.render(<App />); });
-  await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true})); });
+  await act(async () => { host.querySelector<HTMLButtonElement>(".independent-create")!.click(); });
   const canvas = host.querySelector(".flow-canvas-scroll")!;
   for (const [x, y] of [[100, 100], [450, 100], [800, 100]]) {
     pointer(canvas, "pointermove", x, y, 0);

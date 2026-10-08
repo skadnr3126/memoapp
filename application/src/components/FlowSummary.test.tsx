@@ -18,7 +18,7 @@ it("checks the OpenRouter key before saving and renders its output as text", asy
   try {
     await act(async () => root.render(<FlowSummary workspaceRoot="D:/notes" flowId="f" prepare={prepare} />));
     await act(async () => { host.querySelector("button")!.click(); });
-    expect(mocks.invoke).toHaveBeenCalledWith("load_flow_summary", { workspaceRoot: "D:/notes", flowId: "f" });
+    expect(mocks.invoke).toHaveBeenCalledWith("load_flow_summary", { workspaceRoot: "D:/notes", flowId: "f", standalone: false });
     await act(async () => { host.querySelector<HTMLButtonElement>('.flow-summary-key .button-primary')!.click(); });
     expect(mocks.invoke).toHaveBeenCalledWith("has_openrouter_api_key");
     expect(mocks.invoke).not.toHaveBeenCalledWith("summarize_flow", expect.anything());

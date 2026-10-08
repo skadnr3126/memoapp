@@ -70,7 +70,7 @@ const blockRelativePath = (id: string, createdAt: string): string => {
   return `blocks/${year}/${month}/${safeId(id, "Block ID")}.md`;
 };
 
-const flowRelativePath = (id: string): string => `flows/${safeId(id, "Flow ID")}.json`;
+const flowDirectory = (id: string): string => `flows/${safeId(id, "Flow ID")}`;
 
 const cleanLayout = (layout: PersistedLayout, workspace: WorkspaceState): NodePositionsByFlow => {
   const result: NodePositionsByFlow = Object.create(null);
@@ -93,14 +93,17 @@ export const snapshotFor = (workspace: WorkspaceState, nodePositionsByFlow: Node
   const layout = deserializeLayout({ version: 2, nodePositionsByFlow, viewportByFlow: Object.fromEntries(Object.entries(viewportByFlow).filter(([id]) => workspace.flows.has(id))) });
   layout.nodePositionsByFlow = cleanLayout(layout, workspace);
   return {
-    blockFiles: [...workspace.blocks.values()].map((block) => ({
-      relativePath: blockRelativePath(block.id, block.createdAt),
-      content: serializeBlock(block),
+    blockFiles: [...workspace.flows.values()].flatMap(flow => flow.blockIds.map(id => {
+      const block = workspace.blocks.get(id)!;
+      return { relativePath: `${flowDirectory(flow.id)}/${blockRelativePath(block.id, block.createdAt)}`, content: serializeBlock(block) };
     })),
-    flowFiles: [...workspace.flows.values()].map((flow) => ({
-      relativePath: flowRelativePath(flow.id),
-      content: `${JSON.stringify(serializeFlow(flow), null, 2)}\n`,
-    })),
+    flowFiles: [...workspace.flows.values()].flatMap(flow => [
+      { relativePath: `${flowDirectory(flow.id)}/flow.json`, content: `${JSON.stringify(serializeFlow(flow), null, 2)}\n` },
+      { relativePath: `${flowDirectory(flow.id)}/layout.json`, content: `${JSON.stringify({ version: 2,
+        nodePositionsByFlow: { [flow.id]: layout.nodePositionsByFlow[flow.id] },
+        viewportByFlow: layout.viewportByFlow[flow.id] ? { [flow.id]: layout.viewportByFlow[flow.id] } : {},
+      }, null, 2)}\n` },
+    ]),
     workspace: `${JSON.stringify(serializeWorkspaceMetadata(workspace), null, 2)}\n`,
     layout: `${JSON.stringify(layout, null, 2)}\n`,
   };
@@ -118,10 +121,25 @@ export const chooseNativeWorkspace = async (): Promise<string | undefined> => {
 
 export const decodeWorkspace = (loaded: LoadedWorkspace): LoadedWorkspaceState & { needsMigration: boolean } => {
   const blocks = loaded.blockFiles.map((file) => deserializeBlock(file.content));
-  const imports = loaded.flowFiles.map((file) => importFlow(parseJson(file.content, file.relativePath)));
+  const blockPaths = new Map(blocks.map((block, index) => [block.id, loaded.blockFiles[index].relativePath]));
+  const files = loaded.flowFiles.filter(file => !file.relativePath.endsWith("/layout.json"));
+  const imports = files.map((file) => importFlow(parseJson(file.content, file.relativePath)));
   const metadata = loaded.workspace ? deserializeWorkspaceMetadata(parseJson(loaded.workspace, "workspace.json")) : { version: 1 };
   const workspace = restoreWorkspace(blocks, imports.map((item) => item.flow), metadata);
+  for (const [index, file] of files.entries()) {
+    if (!file.relativePath.endsWith("/flow.json")) continue;
+    const flow = imports[index].flow;
+    if (file.relativePath !== `${flowDirectory(flow.id)}/flow.json`) throw new Error("플로우 폴더와 데이터의 ID가 일치하지 않습니다.");
+    for (const id of flow.blockIds) {
+      if (!blockPaths.get(id)?.startsWith(`${flowDirectory(flow.id)}/blocks/`)) throw new Error("플로우의 블록이 다른 저장 폴더에 있습니다.");
+    }
+  }
   const layout = loaded.layout ? deserializeLayout(parseJson(loaded.layout, "layout.json")) : emptyLayout();
+  for (const file of loaded.flowFiles.filter(file => file.relativePath.endsWith("/layout.json"))) {
+    const individual = deserializeLayout(parseJson(file.content, file.relativePath));
+    Object.assign(layout.nodePositionsByFlow, individual.nodePositionsByFlow);
+    Object.assign(layout.viewportByFlow, individual.viewportByFlow);
+  }
   const legacy = imports.filter((item) => item.legacyPositions);
   if (loaded.layout && ((legacy.length && layout.version !== 1) || (layout.version === 1 && imports.some((item) => !item.legacyPositions)))) {
     throw new Error("Flow와 layout 버전이 혼재되어 있습니다. 변환 백업을 확인하세요.");
@@ -133,15 +151,16 @@ export const decodeWorkspace = (loaded: LoadedWorkspace): LoadedWorkspaceState &
     }]));
   }
   return { workspaceRoot: loaded.workspaceRoot, workspace, nodePositionsByFlow: cleanLayout(layout, workspace),
-    viewportByFlow: layout.viewportByFlow, recoveryNotice: loaded.recoveryNotice, needsMigration: legacy.length > 0 || layout.version === 1 };
+    viewportByFlow: layout.viewportByFlow, recoveryNotice: loaded.recoveryNotice, needsMigration: legacy.length > 0 || layout.version === 1 ||
+      loaded.flowFiles.some(file => /^flows\/[^/]+\.json$/.test(file.relativePath)) || loaded.blockFiles.some(file => file.relativePath.startsWith("blocks/")) };
 };
-export const openNativeWorkspace = async (workspaceRoot: string): Promise<LoadedWorkspaceState> => {
+export const openNativeWorkspace = async (workspaceRoot: string, standalone = false): Promise<LoadedWorkspaceState> => {
   if (!isDesktopRuntime()) throw new Error("파일 저장은 데스크톱 앱에서만 사용할 수 있습니다.");
-  const loaded = await invoke<LoadedWorkspace>("open_workspace", { workspaceRoot });
+  const loaded = await invoke<LoadedWorkspace>("open_workspace", { workspaceRoot, standalone });
   const decoded = decodeWorkspace(loaded);
   if (decoded.needsMigration) {
-    await invoke("migrate_workspace", { workspaceRoot, snapshot: snapshotFor(decoded.workspace, decoded.nodePositionsByFlow, decoded.viewportByFlow) });
-    const verified = decodeWorkspace(await invoke<LoadedWorkspace>("open_workspace", { workspaceRoot }));
+    await invoke("migrate_workspace", { workspaceRoot, standalone, snapshot: snapshotFor(decoded.workspace, decoded.nodePositionsByFlow, decoded.viewportByFlow) });
+    const verified = decodeWorkspace(await invoke<LoadedWorkspace>("open_workspace", { workspaceRoot, standalone }));
     if (verified.needsMigration) throw new Error("변환 결과를 확인할 수 없습니다.");
     const expected = snapshotFor(decoded.workspace, decoded.nodePositionsByFlow, decoded.viewportByFlow);
     const actual = snapshotFor(verified.workspace, verified.nodePositionsByFlow, verified.viewportByFlow);
@@ -156,7 +175,8 @@ export const saveNativeWorkspace = async (
   workspace: WorkspaceState,
   nodePositionsByFlow: NodePositionsByFlow,
   viewportByFlow: ViewportsByFlow = {},
+  standalone = false,
 ): Promise<void> => {
   if (!isDesktopRuntime()) return;
-  await invoke("save_workspace_snapshot", { workspaceRoot, snapshot: snapshotFor(workspace, nodePositionsByFlow, viewportByFlow) });
+  await invoke("save_workspace_snapshot", { workspaceRoot, standalone, snapshot: snapshotFor(workspace, nodePositionsByFlow, viewportByFlow) });
 };

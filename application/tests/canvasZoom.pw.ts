@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("canvas grows right and down, keeps its origin and does not shrink after moving back", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: "+ 새 플로우", exact: true }).click();
   const viewport = page.locator(".flow-canvas-scroll");
   const canvas = page.locator(".graph-canvas");
   await viewport.hover({ position: { x: 250, y: 200 } });
@@ -32,7 +32,7 @@ test("canvas grows right and down, keeps its origin and does not shrink after mo
 test("Ctrl+wheel zoom keeps world geometry and scales creation, movement, resize and selection correctly", async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: "+ 새 플로우", exact: true }).click();
   const viewport = page.locator(".flow-canvas-scroll");
   await viewport.hover({ position: { x: 400, y: 250 } });
   await page.keyboard.press("Control+t");

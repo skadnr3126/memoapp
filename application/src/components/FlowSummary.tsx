@@ -3,14 +3,20 @@ import { invoke } from "@tauri-apps/api/core";
 import { isDesktopRuntime } from "../storage/repository";
 import { flowSummaryInput } from "../flowSummary";
 
-type Prepared = { workspaceRoot: string; input: ReturnType<typeof flowSummaryInput> };
+type Prepared = { workspaceRoot: string; standalone?: boolean; input: ReturnType<typeof flowSummaryInput> };
 const keyError = (error: unknown) => String(error).includes("OPENROUTER_KEY_");
 
 type Summary = { path: string; markdown: string };
 const cache = new Map<string, Summary | null>();
 const pending = new Map<string, Promise<Summary | null>>();
+const generations = new Map<string, number>();
+export function invalidateFlowSummary(workspaceRoot: string, flowId: string) {
+  const key = JSON.stringify([workspaceRoot, flowId]);
+  cache.delete(key); pending.delete(key);
+  generations.set(key, (generations.get(key) ?? 0) + 1);
+}
 
-export function FlowSummary({ prepare, workspaceRoot, flowId }: { prepare: () => Promise<Prepared>; workspaceRoot: string; flowId: string }) {
+export function FlowSummary({ prepare, workspaceRoot, flowId, standalone = false }: { prepare: () => Promise<Prepared>; workspaceRoot: string; flowId: string; standalone?: boolean }) {
   const cacheKey = JSON.stringify([workspaceRoot, flowId]);
   const running = useRef(false);
   const [status, setStatus] = useState("");
@@ -23,18 +29,21 @@ export function FlowSummary({ prepare, workspaceRoot, flowId }: { prepare: () =>
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     let cancelled = false;
+    const generation = generations.get(cacheKey) ?? 0;
     const request = pending.get(cacheKey) ?? (cache.has(cacheKey) ? Promise.resolve(cache.get(cacheKey) ?? null) :
-      invoke<Summary | null>("load_flow_summary", { workspaceRoot, flowId }));
+      invoke<Summary | null>("load_flow_summary", { workspaceRoot, flowId, standalone }));
     pending.set(cacheKey, request);
     void request.then(value => {
-      cache.set(cacheKey, value);
-      if (!cancelled) setResult(value);
+      if (generation === (generations.get(cacheKey) ?? 0)) {
+        cache.set(cacheKey, value);
+        if (!cancelled) setResult(value);
+      }
     }).catch(error => { if (!cancelled) setError(String(error)); }).finally(() => {
       if (pending.get(cacheKey) === request) pending.delete(cacheKey);
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [cacheKey, workspaceRoot, flowId]);
+  }, [cacheKey, workspaceRoot, flowId, standalone]);
 
   const runSummary = async () => {
     setStatus("편집 내용과 파일 저장을 확인하는 중…");
@@ -42,11 +51,11 @@ export function FlowSummary({ prepare, workspaceRoot, flowId }: { prepare: () =>
     setStatus("OpenRouter로 Flow를 요약하는 중…");
     if (prepared.workspaceRoot !== workspaceRoot || prepared.input.id !== flowId) throw new Error("Flow가 변경되었습니다. 다시 시도하세요.");
     const request = invoke<Summary>("summarize_flow", prepared);
+    const generation = generations.get(cacheKey) ?? 0;
     pending.set(cacheKey, request);
     try {
       const value = await request;
-      cache.set(cacheKey, value);
-      setResult(value);
+      if (generation === (generations.get(cacheKey) ?? 0)) { cache.set(cacheKey, value); setResult(value); }
     } finally { if (pending.get(cacheKey) === request) pending.delete(cacheKey); }
     setStatus("요약 파일을 저장했습니다.");
   };

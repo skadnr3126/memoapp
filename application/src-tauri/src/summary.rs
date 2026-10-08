@@ -229,30 +229,21 @@ fn run_openrouter(key: &str, input: &str) -> Result<String, String> {
     Ok(markdown)
 }
 
-fn summary_path(workspace_root: &str, flow_id: &str) -> Result<PathBuf, String> {
-    if flow_id.is_empty() || !flow_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
-        return Err("Flow ID가 올바르지 않습니다.".into());
-    }
+fn summary_path(workspace_root: &str, flow_id: &str, standalone: Option<bool>) -> Result<PathBuf, String> {
+    if !super::flow_storage::valid_id(flow_id) { return Err("Flow ID가 올바르지 않습니다.".into()); }
     let root = PathBuf::from(workspace_root);
     if !root.is_absolute() || !root.is_dir() { return Err("작업공간 경로가 올바르지 않습니다.".into()); }
     let root = root.canonicalize().map_err(|e| e.to_string())?;
-    let mut path = root.clone();
-    for part in [".memo", "ai", "summaries"] {
-        path.push(part);
-        if path.is_symlink() { return Err("요약 경로의 심볼릭 링크는 지원하지 않습니다.".into()); }
-        if path.exists() && !path.canonicalize().map_err(|e| e.to_string())?.starts_with(&root) {
-            return Err("요약 경로가 작업공간 밖입니다.".into());
-        }
-    }
-    path.push(format!("{flow_id}.md"));
-    if path.is_symlink() { return Err("요약 파일의 심볼릭 링크는 지원하지 않습니다.".into()); }
+    let storage = super::storage_root(&root, standalone)?;
+    let path = storage.join("flows").join(flow_id).join("ai/summary.md");
+    super::flow_storage::reject_links(&path)?;
     Ok(path)
 }
 
 #[tauri::command]
-pub fn load_flow_summary(window: tauri::Window, workspace_root: String, flow_id: String) -> Result<Option<SummaryResult>, String> {
+pub fn load_flow_summary(window: tauri::Window, workspace_root: String, flow_id: String, standalone: Option<bool>) -> Result<Option<SummaryResult>, String> {
     main_window(&window)?;
-    let path = summary_path(&workspace_root, &flow_id)?;
+    let path = summary_path(&workspace_root, &flow_id, standalone)?;
     match fs::read_to_string(&path) {
         Ok(markdown) => Ok(Some(SummaryResult { path: path.to_string_lossy().into_owned(), markdown })),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -260,21 +251,31 @@ pub fn load_flow_summary(window: tauri::Window, workspace_root: String, flow_id:
     }
 }
 
-fn summarize(workspace_root: String, input: SummaryInput) -> Result<SummaryResult, String> {
+fn summarize(workspace_root: String, input: SummaryInput, standalone: Option<bool>) -> Result<SummaryResult, String> {
     validate(&input)?;
     let json = serde_json::to_string(&input).map_err(|e| e.to_string())?;
     if json.len() > 2_000_000 {
         return Err("요약할 내용이 너무 큽니다. Flow를 나누어 다시 시도하세요.".into());
     }
-    let path = summary_path(&workspace_root, &input.id)?;
+    let path = summary_path(&workspace_root, &input.id, standalone)?;
     let key = read_api_key()?.ok_or("OPENROUTER_KEY_REQUIRED:OpenRouter API 키를 등록하세요.")?;
     let markdown = run_openrouter(&key, &json)?;
-    fs::create_dir_all(path.parent().ok_or("요약 폴더가 없습니다.")?).map_err(|e| e.to_string())?;
-    super::write_atomic(&path, &markdown)?;
+    save_completed_summary(&path, &input.id, &markdown)?;
     Ok(SummaryResult {
         path: path.to_string_lossy().into_owned(),
         markdown,
     })
+}
+
+fn save_completed_summary(path: &std::path::Path, flow_id: &str, markdown: &str) -> Result<(), String> {
+    let _lock = super::STORAGE_LOCK.lock().map_err(|_| "저장 잠금 오류")?;
+    super::flow_storage::reject_links(path)?;
+    let flow_path = path.parent().and_then(|p| p.parent()).ok_or("플로우 폴더가 없습니다.")?.join("flow.json");
+    let flow = fs::read_to_string(flow_path).map_err(|_| "요약 중 플로우가 이동되거나 삭제되었습니다. 다시 요약하세요.")?;
+    let value: serde_json::Value = serde_json::from_str(&flow).map_err(|e| e.to_string())?;
+    if value["id"].as_str() != Some(flow_id) { return Err("요약할 플로우 ID가 변경되었습니다.".into()); }
+    fs::create_dir_all(path.parent().ok_or("요약 폴더가 없습니다.")?).map_err(|e| e.to_string())?;
+    super::write_atomic(path, markdown)
 }
 
 fn main_window(window: &tauri::Window) -> Result<(), String> {
@@ -322,9 +323,10 @@ pub async fn summarize_flow(
     window: tauri::Window,
     workspace_root: String,
     input: SummaryInput,
+    standalone: Option<bool>,
 ) -> Result<SummaryResult, String> {
     main_window(&window)?;
-    tauri::async_runtime::spawn_blocking(move || summarize(workspace_root, input))
+    tauri::async_runtime::spawn_blocking(move || summarize(workspace_root, input, standalone))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -336,14 +338,26 @@ mod tests {
     fn summary_overwrites_one_file_per_flow() {
         let root = std::env::temp_dir().join(format!("memo-summary-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         fs::create_dir_all(&root).unwrap();
-        let path = summary_path(root.to_str().unwrap(), "flow_a").unwrap();
+        let path = summary_path(root.to_str().unwrap(), "flow_a", None).unwrap();
         super::super::write_atomic(&path, "first").unwrap();
         super::super::write_atomic(&path, "second").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "second");
         assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
-        assert_ne!(path, summary_path(root.to_str().unwrap(), "flow_b").unwrap());
-        assert!(summary_path(root.to_str().unwrap(), "../outside").is_err());
+        assert_ne!(path, summary_path(root.to_str().unwrap(), "flow_b", None).unwrap());
+        assert!(summary_path(root.to_str().unwrap(), "../outside", None).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn late_summary_result_does_not_recreate_moved_flow() {
+        let temp = super::super::tests::Temp::new();
+        let flow = temp.0.join(".memo/flows/F");
+        super::super::write_atomic(&flow.join("flow.json"), r#"{"id":"F"}"#).unwrap();
+        let path = summary_path(temp.0.to_str().unwrap(), "F", None).unwrap();
+        save_completed_summary(&path, "F", "first").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "first");
+        fs::remove_dir_all(&flow).unwrap();
+        assert!(save_completed_summary(&path, "F", "late HTTP result").is_err());
+        assert!(!flow.exists());
     }
     #[test]
     fn rejects_path_ids_and_missing_link_endpoints() {

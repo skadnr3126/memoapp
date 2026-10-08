@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("cleared text stays empty; all corners resize and moving retains size", async ({ page }) => {
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: "+ 새 플로우", exact: true }).click();
   const title = page.getByRole("textbox", { name: "Flow 이름", exact: true });
   await title.fill("");
   await expect(title).toHaveValue("");
@@ -48,7 +48,7 @@ test("cleared text stays empty; all corners resize and moving retains size", asy
 
 test("overflowing block text remains readable and editable with an inner scrollbar", async ({ page }) => {
   await page.goto("http://localhost:1420");
-  await page.getByRole("button", { name: "만들기", exact: true }).click();
+  await page.getByRole("button", { name: "+ 새 플로우", exact: true }).click();
   await page.locator(".flow-canvas-scroll").hover({ position: { x: 100, y: 100 } });
   await page.keyboard.press("Control+t");
   const node = page.locator(".flow-node").first();

@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   canvas: vi.fn<(props: ComponentProps<typeof FlowCanvas>) => null>(() => null),
 }));
 vi.mock("@tauri-apps/api/event", () => ({ emitTo: mocks.emit, listen: vi.fn(async (name, handler) => { mocks.handlers.set(name, handler); return () => mocks.handlers.delete(name); }) }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command, args) => command === "recent_workspaces" ? ["D:/notes"] : command === "resolve_workspace_root" ? args.workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase().replace(/^d:/, "D:") : {}) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (command, args) => command === "independent_workspace_root" ? "D:/Library" : command === "workspace_session" ? { openWorkspaceRoots: [], activeWorkspaceRoot: null } : command === "recent_workspaces" ? ["D:/notes"] : command === "resolve_workspace_root" ? args.workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase().replace(/^d:/, "D:") : {}) }));
 vi.mock("@tauri-apps/api/webviewWindow", () => ({ WebviewWindow: { getByLabel: vi.fn(async () => ({ setFocus: mocks.focus })) } }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ onCloseRequested: async () => () => {} }) }));
 vi.mock("./storage/repository", async importOriginal => ({ ...await importOriginal<object>(), isDesktopRuntime: () => true, openNativeWorkspace: mocks.open, chooseNativeWorkspace: mocks.choose, saveNativeWorkspace: mocks.save }));
@@ -44,9 +44,10 @@ beforeEach(async () => {
   const flow = createFlow(createWorkspace());
   const first = createBlock(flow.workspace, flow.flowId); a = first.blockId;
   const second = createBlock(first.workspace, flow.flowId); b = second.blockId;
-  mocks.open.mockResolvedValue({ workspaceRoot: "D:/notes", workspace: second.workspace, nodePositionsByFlow: {} });
+  mocks.open.mockResolvedValueOnce({ workspaceRoot: "D:/Library", workspace: createWorkspace(), nodePositionsByFlow: {}, viewportByFlow: {} }).mockResolvedValue({ workspaceRoot: "D:/notes", workspace: second.workspace, nodePositionsByFlow: {}, viewportByFlow: {} });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<App />));
+  await act(async () => host.querySelector<HTMLButtonElement>(".workspace-add-button")!.click());
   await act(async () => (Array.from(host.querySelectorAll("button")).find(b => b.textContent === "D:/notes")!).click());
   await receive(EDITOR_READY);
   await open(a);
@@ -116,9 +117,8 @@ it("resets the lock after closing or reloading the editor window", async () => {
 it("clears the pinned session when changing workspaces", async () => {
   const pinned = session();
   await receive(EDITOR_LOCK, { sessionId: pinned.sessionId, locked: true });
-  await act(async () => host.querySelector<HTMLButtonElement>(".workspace-switch-button")!.click());
+  await chooseOther();
   expect(mocks.emit).toHaveBeenCalledWith("editor", EDITOR_CLEAR);
-  await act(async () => host.querySelector<HTMLButtonElement>(".workspace-picker-button")!.click());
   await open(b);
   expect(session().blockId).toBe(b);
   expect(session().workspaceSession).not.toBe(pinned.workspaceSession);
@@ -177,7 +177,7 @@ it("keeps tab content, geometry and undo isolated even when block IDs match", as
   expect(canvas().workspace.blocks.get(a)?.title).toBe("");
   await click('.workspace-tab button[title="D:/other"]');
   expect(canvas().workspace.blocks.get(a)?.title).toBe("B title");
-  expect(mocks.open).toHaveBeenCalledTimes(2);
+  expect(mocks.open).toHaveBeenCalledTimes(3);
 });
 
 it("deduplicates canonical paths and selects the existing tab without replacing either tab", async () => {
@@ -188,7 +188,7 @@ it("deduplicates canonical paths and selects the existing tab without replacing 
   expect(host.querySelector('[aria-current="page"]')?.getAttribute("title")).toBe("D:/notes");
   await click(".workspace-select-button");
   expect(tabs()).toHaveLength(2);
-  expect(mocks.open).toHaveBeenCalledTimes(2);
+  expect(mocks.open).toHaveBeenCalledTimes(3);
 });
 
 it("flushes editor changes before saving and rejects a late save from the previous workspace", async () => {
@@ -307,5 +307,5 @@ it("replaces only the selected tab and closes tabs without deleting their data",
   expect(host.querySelector('[aria-current="page"]')?.getAttribute("title")).toBe("D:/notes");
   await click(".workspace-tab-close");
   expect(tabs()).toHaveLength(0);
-  expect(host.querySelector(".workspace-picker-button")).not.toBeNull();
+  expect(host.querySelector(".independent-create")).not.toBeNull();
 });
