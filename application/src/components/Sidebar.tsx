@@ -64,7 +64,6 @@ export function Sidebar({ collapsed = false, groups, activeRoot, activeFlowId, v
   </section>;
 
   return <aside id="flow-sidebar" className="sidebar" hidden={collapsed}>
-    <div className="brand"><span className="brand-mark">M</span><div><p className="eyebrow">FLOW MEMO · CANVAS</p><h1>생각의 흐름</h1></div></div>
     <button className="button button-primary independent-create" type="button" disabled={!independent} onClick={() => independent && onCreateFlow(independent.root)}>+ 새 플로우</button>
     <nav className="flow-list" aria-label="Flow 목록">
       {independent && groupSection(independent)}
