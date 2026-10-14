@@ -138,7 +138,7 @@ describe("node creation gestures", () => {
   it("starts a connection from the right-clicked block instead of the previous selection", () => {
     pointer(nodes()[0], "pointerdown", 300, 200);
     pointer(viewport(), "pointerup", 300, 200);
-    click(host.querySelector('[role="menuitem"]')!);
+    click([...host.querySelectorAll('[role="menuitem"]')].find(element => element.textContent?.startsWith("연결모드 진입"))!);
     expect(nodes()[0].classList.contains("connection-first")).toBe(true);
     click(nodes()[1]); finishLink();
     expect(links()).toHaveLength(1);

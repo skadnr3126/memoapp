@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { boundsOverlap, centerNodeAt, clampScroll, findDirectionalNeighbor, getAutoScrollDelta, getPannedScroll, keepNodeInside } from "./FlowCanvas";
+import { boundsOverlap, centerNodeAt, clampScroll, findDirectionalNeighbor, getAutoScrollDelta, getPannedScroll, keepNodeInside, moveNodes } from "./FlowCanvas";
+
+describe("moveNodes", () => {
+  it("moves the whole selection and preserves relative placement at the origin", () => {
+    const positions = { a: { x: 4, y: 6, width: 380 }, b: { x: 104, y: 206 }, c: { x: 500, y: 500 } };
+    expect(moveNodes(positions, ["a", "b"], "ArrowLeft")).toEqual({ a: { x: 0, y: 6, width: 380 }, b: { x: 100, y: 206 } });
+    expect(moveNodes(positions, ["a", "b"], "ArrowUp")).toEqual({ a: { x: 4, y: 0, width: 380 }, b: { x: 104, y: 200 } });
+    expect(moveNodes(positions, ["a", "b"], "ArrowRight")).toEqual({ a: { x: 14, y: 6, width: 380 }, b: { x: 114, y: 206 } });
+    expect(moveNodes(positions, [], "ArrowLeft")).toEqual({});
+    expect(moveNodes({ a: { x: -60, y: -30 }, b: { x: 100, y: 200 } }, ["a", "b"], "ArrowRight"))
+      .toEqual({ a: { x: 0, y: 0 }, b: { x: 160, y: 230 } });
+  });
+});
 
 it("fixes the top-left boundary without limiting growth to the right or bottom", () => {
   expect(keepNodeInside({ x: -20, y: 490, width: 320, height: 144 })).toEqual({ x: 0, y: 490, width: 320, height: 144 });

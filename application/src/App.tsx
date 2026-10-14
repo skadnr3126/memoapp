@@ -63,6 +63,7 @@ function App() {
   const [nodePositionsByFlow, setNodePositionsByFlow] = useState<NodePositionsByFlow>({});
   const [viewportByFlow, setViewportByFlow] = useState<ViewportsByFlow>({});
   const [selectedBlockIds, setSelectedBlockIds] = useState<BlockId[]>([]);
+  const [blockFocusRequest, setBlockFocusRequest] = useState<{ flowId: string; blockId: BlockId }>();
   const [connection, setConnection] = useState<ConnectionState>({ kind: "idle" });
   const [selectedLinkId, setSelectedLinkId] = useState<string>();
   const workspaceSessionRef = useRef(crypto.randomUUID());
@@ -138,7 +139,7 @@ function App() {
     editorSessionRef.current = undefined;
     if (isDesktopRuntime()) void emitTo("editor", EDITOR_CLEAR);
   };
-  const resetInteraction = () => { setConnection({ kind: "idle" }); setSelectedLinkId(undefined); setSelectedBlockIds([]); };
+  const resetInteraction = () => { setConnection({ kind: "idle" }); setSelectedLinkId(undefined); setSelectedBlockIds([]); setBlockFocusRequest(undefined); };
 
   const activeFlow = workspace.activeFlowId ? workspace.flows.get(workspace.activeFlowId) : undefined;
   const validationErrors = useMemo(() => validateWorkspace(workspace), [workspace]);
@@ -715,20 +716,24 @@ function App() {
       .catch((error) => setMessage(error instanceof Error ? error.message : "편집 창을 열지 못했습니다."));
   };
 
-  const newBlockPlacement = (flow: Flow) => {
+  const newBlockPlacement = (flow: Flow, anchorId = selectedBlockIds.length === 1 ? selectedBlockIds[0] : undefined) => {
     const positions = flow.blockIds.map((id, index) => nodePositionsByFlow[flow.id]?.[id] ?? defaultPosition(index));
-    const selected = selectedBlockIds.length === 1 ? flow.blockIds.indexOf(selectedBlockIds[0]) : -1;
+    const selected = anchorId ? flow.blockIds.indexOf(anchorId) : -1;
     const preferred = selected >= 0 ? { x: positions[selected].x + (positions[selected].width ?? NODE_WIDTH) + 48, y: positions[selected].y } : defaultPosition(flow.blockIds.length);
     return { positions, preferred };
   };
-  const addBlock = (position?: { x: number; y: number }) => {
+  const addBlock = (position?: { x: number; y: number }, sourceId?: BlockId) => {
     if (!activeFlow || connection.kind !== "idle") return;
-    const result = runCommand("블록 추가", (current) => createBlock(current, activeFlow.id));
+    const result = runCommand(sourceId ? "연결된 블록 추가" : "블록 추가", (current) => {
+      const created = createBlock(current, activeFlow.id);
+      return sourceId ? { ...created, workspace: connectBlocks(created.workspace, activeFlow.id, sourceId, created.blockId).workspace } : created;
+    });
     if (!result) return;
-    const { positions, preferred } = newBlockPlacement(activeFlow);
+    const { positions, preferred } = newBlockPlacement(activeFlow, sourceId ?? (selectedBlockIds.length === 1 ? selectedBlockIds[0] : undefined));
     const point = position ?? findFreePosition(positions, preferred);
     setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], [result.blockId]: point } }));
     setSelectedBlockIds([result.blockId]); setSelectedLinkId(undefined);
+    setBlockFocusRequest({ flowId: activeFlow.id, blockId: result.blockId });
   };
   const beginConnection = () => {
     if (!activeFlow || connection.kind !== "idle") return;
@@ -801,6 +806,8 @@ function App() {
     if (!created) return;
     setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], ...created.pastedPositions } }));
     setSelectedBlockIds(created.blockIds); setSelectedLinkId(undefined);
+    const firstId = created.blockIds[0];
+    if (firstId) setBlockFocusRequest({ flowId: activeFlow.id, blockId: firstId });
   };
 
   useEffect(() => {
@@ -841,6 +848,7 @@ function App() {
         const previous = undoRef.current; undoRef.current = undefined;
         workspaceRef.current = previous.workspace; setWorkspace(previous.workspace); setNodePositionsByFlow(previous.positions);
         setSelectedBlockIds([]); setSelectedLinkId(undefined); setConnection({ kind: "idle" }); setMessage("실행 취소 완료");
+        setBlockFocusRequest(undefined);
         return;
       }
       if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "d") {
@@ -1084,7 +1092,10 @@ function App() {
             {storageError && <div className="storage-error" role="alert">{storageError} <button className="storage-retry" type="button" onClick={() => void retrySave()}>다시 시도</button></div>}
             <div className="flow-work-area">
               <FlowCanvas key={`${workspaceRoot}:${activeFlow.id}`}
+                blockFocusRequest={blockFocusRequest}
+                onBlockFocusHandled={() => setBlockFocusRequest(undefined)}
                 onCreateBlock={addBlock}
+                onCreateConnectedBlock={(id) => addBlock(undefined, id)}
                 onPointerBlockPositionChange={(position) => { pointerBlockPositionRef.current = position; }}
                 onDeleteBlock={deleteSelectedBlock}
                 onChangeBlockColor={(id, color) => { runCommand("블록 색상 변경", current => updateBlock(current, id, { color })); }}
@@ -1103,7 +1114,11 @@ function App() {
                 onViewportChange={view => { if (canEditActiveFlow()) setViewportByFlow(current => ({ ...current, [activeFlow.id]: view })); }}
                 selectedBlockIds={selectedBlockIds}
                 onSelectedBlockIdsChange={(ids) => { if (canEditActiveFlow()) { setSelectedBlockIds(ids); setSelectedLinkId(undefined); } }}
-                onNodePositionsChange={(positions) => { if (canEditActiveFlow()) setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], ...positions } })); }}
+                onNodePositionsChange={(positions, recordUndo) => {
+                  if (!canEditActiveFlow()) return;
+                  if (recordUndo) undoRef.current = { workspace: workspaceRef.current, positions: latestRef.current.nodePositionsByFlow };
+                  setNodePositionsByFlow((current) => ({ ...current, [activeFlow.id]: { ...current[activeFlow.id], ...positions } }));
+                }}
                 connection={connection}
                 onChooseConnectionBlock={(id) => setConnection((current) => chooseConnectionBlock(current, id))}
                 selectedLinkId={selectedLinkId}
