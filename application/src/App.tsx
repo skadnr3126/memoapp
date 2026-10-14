@@ -63,7 +63,8 @@ function App() {
   const [nodePositionsByFlow, setNodePositionsByFlow] = useState<NodePositionsByFlow>({});
   const [viewportByFlow, setViewportByFlow] = useState<ViewportsByFlow>({});
   const [selectedBlockIds, setSelectedBlockIds] = useState<BlockId[]>([]);
-  const [blockFocusRequest, setBlockFocusRequest] = useState<{ flowId: string; blockId: BlockId }>();
+  const [blockFocusRequest, setBlockFocusRequest] = useState<{ flowId: string; blockId: BlockId | null }>();
+  const blockFocusHistoryRef = useRef<BlockId[]>([]);
   const [connection, setConnection] = useState<ConnectionState>({ kind: "idle" });
   const [selectedLinkId, setSelectedLinkId] = useState<string>();
   const workspaceSessionRef = useRef(crypto.randomUUID());
@@ -139,7 +140,7 @@ function App() {
     editorSessionRef.current = undefined;
     if (isDesktopRuntime()) void emitTo("editor", EDITOR_CLEAR);
   };
-  const resetInteraction = () => { setConnection({ kind: "idle" }); setSelectedLinkId(undefined); setSelectedBlockIds([]); setBlockFocusRequest(undefined); };
+  const resetInteraction = () => { setConnection({ kind: "idle" }); setSelectedLinkId(undefined); setSelectedBlockIds([]); setBlockFocusRequest(undefined); blockFocusHistoryRef.current = []; };
 
   const activeFlow = workspace.activeFlowId ? workspace.flows.get(workspace.activeFlowId) : undefined;
   const validationErrors = useMemo(() => validateWorkspace(workspace), [workspace]);
@@ -775,7 +776,23 @@ function App() {
         Object.entries(current[activeFlow.id] ?? {}).filter(([id]) => !deletedBlockIds.has(id)),
       ),
     }));
-    setSelectedBlockIds([]);
+    const remainingIds = result.workspace.flows.get(activeFlow.id)?.blockIds ?? [];
+    const remaining = new Set(remainingIds);
+    const lastFocusedId = blockFocusHistoryRef.current[0];
+    blockFocusHistoryRef.current = blockFocusHistoryRef.current.filter(id => remaining.has(id));
+    let focusId = blockFocusHistoryRef.current[0];
+    if (!focusId) {
+      const positions = new Map(activeFlow.blockIds.map((id, index) => [id, nodePositionsByFlow[activeFlow.id]?.[id] ?? defaultPosition(index)]));
+      const anchor = positions.get(lastFocusedId ?? blockIds[0]);
+      const distance = (id: BlockId) => {
+        const point = positions.get(id);
+        return anchor && point ? Math.hypot(point.x - anchor.x, point.y - anchor.y) : 0;
+      };
+      focusId = [...remainingIds].sort((a, b) => distance(a) - distance(b))[0];
+    }
+    setSelectedBlockIds(focusId ? [focusId] : []);
+    setSelectedLinkId(undefined);
+    setBlockFocusRequest({ flowId: activeFlow.id, blockId: focusId ?? null });
   };
   const deleteSelectedBlock = (blockId: BlockId) => deleteSelectedBlocks([blockId]);
 
@@ -1093,6 +1110,7 @@ function App() {
             <div className="flow-work-area">
               <FlowCanvas key={`${workspaceRoot}:${activeFlow.id}`}
                 blockFocusRequest={blockFocusRequest}
+                onBlockFocus={(id) => { blockFocusHistoryRef.current = [id, ...blockFocusHistoryRef.current.filter(previous => previous !== id)]; }}
                 onBlockFocusHandled={() => setBlockFocusRequest(undefined)}
                 onCreateBlock={addBlock}
                 onCreateConnectedBlock={(id) => addBlock(undefined, id)}

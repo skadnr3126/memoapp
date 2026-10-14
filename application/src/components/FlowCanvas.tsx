@@ -97,7 +97,8 @@ type FlowCanvasProps = {
   selectedBlockIds: BlockId[];
   onSelectedBlockIdsChange: (blockIds: BlockId[]) => void;
   onNodePositionsChange: (positions: Record<BlockId, NodePosition>, recordUndo?: boolean) => void;
-  blockFocusRequest?: { flowId: string; blockId: BlockId };
+  blockFocusRequest?: { flowId: string; blockId: BlockId | null };
+  onBlockFocus?: (blockId: BlockId) => void;
   onBlockFocusHandled?: () => void;
   connection: ConnectionState;
   onChooseConnectionBlock: (id: BlockId) => void;
@@ -122,7 +123,7 @@ export function FlowCanvas({
   selectedBlockIds,
   onSelectedBlockIdsChange,
   onNodePositionsChange,
-  blockFocusRequest, onBlockFocusHandled,
+  blockFocusRequest, onBlockFocusHandled, onBlockFocus,
   connection, onChooseConnectionBlock, selectedLinkId, onSelectLink, onCreateBlock, onCreateConnectedBlock, onPointerBlockPositionChange, onDeleteBlock, onChangeBlockColor, onDeleteLink, onBeginConnection,
 }: FlowCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -221,7 +222,7 @@ export function FlowCanvas({
   const linking = connection.kind !== "idle";
   useLayoutEffect(() => {
     if (!blockFocusRequest || blockFocusRequest.flowId !== flow.id) return;
-    const element = nodeElementsRef.current.get(blockFocusRequest.blockId);
+    const element = blockFocusRequest.blockId === null ? canvasRef.current : nodeElementsRef.current.get(blockFocusRequest.blockId);
     if (!element) return;
     element.focus();
     element.scrollIntoView?.({ block: "nearest", inline: "nearest" });
@@ -461,7 +462,7 @@ export function FlowCanvas({
         </> : <button role="menuitem" onClick={() => { onCreateBlock?.(menu.position); setMenu(undefined); }}>새 노드 생성 <span>Ctrl+T</span></button>}
       </div>}
       <div className="canvas-surface" style={{ width: width * zoom, height: height * zoom }}>
-      <div className="flow-canvas graph-canvas" ref={canvasRef} style={{ width, height, transform: `scale(${zoom})` }}
+      <div className="flow-canvas graph-canvas" ref={canvasRef} tabIndex={-1} style={{ width, height, transform: `scale(${zoom})` }}
         onPointerDown={(e) => {
           if (linking || e.button !== 0 || (e.target instanceof Element && e.target.closest(".node-wrap, .link-hit"))) return;
           setEditingId(undefined);
@@ -493,7 +494,11 @@ export function FlowCanvas({
           const point = screenPosition(blockId);
           const first = connection.kind !== "idle" && connection.kind !== "first" && connection.first === blockId;
           const second = connection.kind === "ready" && connection.second === blockId;
-          return <div className="node-wrap graph-node-wrap" data-block-id={blockId} style={{ left: point.x, top: point.y, width: point.width }} key={blockId}>
+          return <div className="node-wrap graph-node-wrap" data-block-id={blockId} style={{ left: point.x, top: point.y, width: point.width }} key={blockId}
+            onFocusCapture={() => {
+              onBlockFocus?.(blockId);
+              if (!linking && !selectedBlockIdSet.has(blockId)) onSelectedBlockIdsChange([blockId]);
+            }}>
             <article ref={(element) => { if (element) nodeElementsRef.current.set(blockId, element); else nodeElementsRef.current.delete(blockId); }}
               style={{ height: point.height, backgroundColor: BLOCK_COLORS.find(color => color.value === block.color)?.background }}
               className={"flow-node" + (editingId === blockId ? " is-editing" : "") + (selectedBlockIdSet.has(blockId) ? " is-selected" : "") + (first ? " connection-first" : "") + (second ? " connection-second" : "")}
